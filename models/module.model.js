@@ -61,7 +61,6 @@ const ModuleSchema = new mongoose.Schema({
           default: true,
         },
         visibleFromDate: Date,
-        // Other batch-specific settings
       },
     },
   ],
@@ -131,7 +130,7 @@ ModuleSchema.pre("save", function (next) {
   next();
 });
 
-// Add method to get next module in course
+
 ModuleSchema.methods.getNextModule = async function () {
   return this.model("Module").findOne({
     course: this.course,

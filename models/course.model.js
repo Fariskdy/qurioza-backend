@@ -120,13 +120,11 @@ const CourseSchema = new mongoose.Schema({
 
 // Virtual for calculating total lectures
 CourseSchema.virtual("totalLectures").get(function () {
-  // This would need to be populated from modules
   return 0;
 });
 
 // Virtual for calculating total duration
 CourseSchema.virtual("totalDuration").get(function () {
-  // This would need to be populated from modules
   return 0;
 });
 
