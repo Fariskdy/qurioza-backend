@@ -18,10 +18,24 @@ const generateRefreshToken = (user) => {
   });
 };
 
+const generateResetPasswordToken = (user) => {
+  return jwt.sign({ userId: user._id }, process.env.JWT_RESET_PASSWORD_SECRET, {
+    expiresIn: "1h",
+  });
+};
+
 // Token Verification Functions
 const verifyRefreshToken = (token) => {
   try {
     return jwt.verify(token, process.env.JWT_REFRESH_SECRET);
+  } catch (error) {
+    return null;
+  }
+};
+
+const verifyResetPasswordToken = (token) => {
+  try {
+    return jwt.verify(token, process.env.JWT_RESET_PASSWORD_SECRET);
   } catch (error) {
     return null;
   }
@@ -66,6 +80,19 @@ const forceCleanup = () => {
 // Set up automatic cleanup interval
 setInterval(cleanupExpiredTokens, CLEANUP_INTERVAL);
 
+// Add cookie configuration
+const cookieOptions = {
+  httpOnly: true,
+  secure: process.env.NODE_ENV === "production", // true in production
+  sameSite: "strict",
+  maxAge: 15 * 60 * 1000, // 15 minutes for access token
+};
+
+const refreshCookieOptions = {
+  ...cookieOptions,
+  maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days for refresh token
+};
+
 module.exports = {
   generateAccessToken,
   generateRefreshToken,
@@ -73,4 +100,8 @@ module.exports = {
   invalidateToken,
   isTokenBlacklisted,
   forceCleanup,
+  generateResetPasswordToken,
+  verifyResetPasswordToken,
+  cookieOptions,
+  refreshCookieOptions,
 };

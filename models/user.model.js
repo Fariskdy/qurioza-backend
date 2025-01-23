@@ -20,7 +20,7 @@ const UserSchema = new mongoose.Schema({
   role: {
     type: String,
     required: true,
-    enum: ["admin","course coordinator", "teacher", "student"],
+    enum: ["admin", "course coordinator", "teacher", "student"],
   },
   createdAt: {
     type: Date,
@@ -29,6 +29,14 @@ const UserSchema = new mongoose.Schema({
   updatedAt: {
     type: Date,
     default: Date.now,
+  },
+  resetPasswordToken: {
+    type: String,
+    default: null,
+  },
+  resetPasswordExpires: {
+    type: Date,
+    default: null,
   },
 });
 

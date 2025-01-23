@@ -2,8 +2,14 @@ const jwt = require("jsonwebtoken");
 const { isTokenBlacklisted } = require("../config/jwt");
 
 const authenticateToken = (req, res, next) => {
-  const authHeader = req.headers["authorization"];
-  const token = authHeader && authHeader.split(" ")[1];
+  // Try to get token from cookie first
+  let token = req.cookies?.accessToken;
+
+  // If no cookie, try Authorization header
+  if (!token) {
+    const authHeader = req.headers["authorization"];
+    token = authHeader && authHeader.split(" ")[1];
+  }
 
   if (!token) {
     return res.status(401).json({ message: "Authentication required" });
