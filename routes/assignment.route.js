@@ -21,7 +21,7 @@ router.get("/", getAssignments);
 router.get("/:assignmentId", getAssignment);
 
 // Teacher only routes
-router.use(checkRole(["teacher", "course coordinator"]));
+router.use(checkRole("teacher"));
 router.post("/", createAssignment);
 router.put("/:assignmentId", updateAssignment);
 router.delete("/:assignmentId", deleteAssignment);

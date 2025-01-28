@@ -38,6 +38,11 @@ const UserSchema = new mongoose.Schema({
     type: Date,
     default: null,
   },
+  coordinator: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "User",
+    default: null, // For teachers, this will reference their coordinator
+  },
 });
 
 // Hash password before saving

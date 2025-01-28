@@ -19,36 +19,49 @@ const CategorySchema = new mongoose.Schema({
   image: {
     type: String,
   },
+  imagePublicId: {
+    type: String,
+  },
+  status: {
+    type: String,
+    enum: ["active", "inactive"],
+    default: "active",
+  },
   createdAt: {
     type: Date,
     default: Date.now,
   },
 });
 
-// Add indexes for better query performance
+// Indexes
 CategorySchema.index({ slug: 1 });
 CategorySchema.index({ createdAt: -1 });
 
-CategorySchema.pre("save", function (next) {
-  if (this.isModified("name")) {
+// Slug generation
+CategorySchema.pre("validate", function (next) {
+  if (this.name) {
     this.slug = slugify(this.name, {
       lower: true,
       strict: true,
       trim: true,
     });
   }
-
-  // Validate name length
-  if (this.name.length < 3) {
-    next(new Error("Category name must be at least 3 characters long"));
-  }
-
-  // Validate description length
-  if (this.description.length < 10) {
-    next(new Error("Category description must be at least 10 characters long"));
-  }
-
   next();
+});
+
+// Validation hooks
+CategorySchema.pre("save", async function (next) {
+  if (this.name.length < 3) {
+    return next(new Error("Category name must be at least 3 characters long"));
+  }
+
+  if (this.description.length < 10) {
+    return next(
+      new Error("Category description must be at least 10 characters long")
+    );
+  }
+
+  return next();
 });
 
 module.exports = mongoose.model("Category", CategorySchema);

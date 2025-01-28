@@ -135,15 +135,18 @@ CourseSchema.index({ slug: 1 });
 CourseSchema.index({ "stats.rating": -1, status: 1 }); // For sorting by rating
 
 // Enhanced validation hook
-CourseSchema.pre("save", function (next) {
-  if (this.isModified("title")) {
+CourseSchema.pre("validate", function (next) {
+  if (this.title) {
     this.slug = slugify(this.title, {
       lower: true,
       strict: true,
       trim: true,
     });
   }
+  next();
+});
 
+CourseSchema.pre("save", function (next) {
   // Validate price
   if (this.price < 0) {
     next(new Error("Price cannot be negative"));
@@ -161,13 +164,46 @@ CourseSchema.pre("save", function (next) {
 });
 
 // Add method to check if course can start new batch
-CourseSchema.methods.canStartNewBatch = async function () {
+CourseSchema.methods.getActiveBatch = async function () {
   const Batch = mongoose.model("Batch");
-  const activeBatch = await Batch.findOne({
+  return await Batch.findOne({
     course: this._id,
     status: { $in: ["enrolling", "ongoing"] },
   });
-  return !activeBatch;
+};
+
+CourseSchema.methods.canStartNewBatch = async function () {
+  const Batch = mongoose.model("Batch");
+
+  // Find active batches (enrolling or ongoing)
+  const activeBatches = await Batch.find({
+    course: this._id,
+    status: { $in: ["enrolling", "ongoing"] },
+  }).sort({ batchStartDate: 1 });
+
+  // If no active batches, we can start a new one
+  if (activeBatches.length === 0) return true;
+
+  // Only check if there's already an enrolling batch
+  const enrollingBatch = activeBatches.find((b) => b.status === "enrolling");
+
+  // If there's an enrolling batch, don't allow another
+  if (enrollingBatch) return false;
+
+  // Allow new batch enrollment regardless of ongoing batch status
+  return true;
+};
+
+// Add missing virtuals
+CourseSchema.virtual("isDiscounted").get(function () {
+  return (
+    this.pricing.discountedPrice && this.pricing.discountExpiresAt > Date.now()
+  );
+});
+
+// Add missing methods
+CourseSchema.methods.calculateProgress = async function (studentId) {
+  // Calculate student's progress in course
 };
 
 module.exports = mongoose.model("Course", CourseSchema);

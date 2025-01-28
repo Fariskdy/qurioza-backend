@@ -1,6 +1,8 @@
 const Batch = require("../models/batch.model");
 const Course = require("../models/course.model");
 const Enrollment = require("../models/enrollment.model");
+const mongoose = require("mongoose");
+const User = require("../models/user.model");
 
 // Get all batches for a course
 const getBatches = async (req, res) => {
@@ -52,14 +54,6 @@ const createBatch = async (req, res) => {
       return res.status(404).json({ message: "Course not found" });
     }
 
-    // Check if course can have new batch
-    const canStartNewBatch = await course.canStartNewBatch();
-    if (!canStartNewBatch) {
-      return res.status(400).json({
-        message: "Cannot create new batch while another is active",
-      });
-    }
-
     // Get next batch number
     const lastBatch = await Batch.findOne({ course: req.params.courseId })
       .sort({ batchNumber: -1 })
@@ -67,10 +61,12 @@ const createBatch = async (req, res) => {
 
     const batchNumber = lastBatch ? lastBatch.batchNumber + 1 : 1;
 
+    // New batch always starts as "upcoming"
     const batch = await Batch.create({
       ...req.body,
       course: req.params.courseId,
       batchNumber,
+      status: "upcoming", // Explicitly set status
     });
 
     res.status(201).json(batch);
@@ -171,52 +167,86 @@ const deleteBatch = async (req, res) => {
   }
 };
 
-// Update batch status
+// Update batch status with enhanced validation
 const updateBatchStatus = async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
   try {
     const { status } = req.body;
+    const currentDate = new Date();
+
     const batch = await Batch.findOne({
       _id: req.params.batchId,
       course: req.params.courseId,
-    });
+    }).session(session);
 
     if (!batch) {
-      return res.status(404).json({ message: "Batch not found" });
+      throw new Error("Batch not found");
     }
 
-    // Verify user is course coordinator
+    // Verify coordinator
     const course = await Course.findOne({
       _id: req.params.courseId,
       coordinator: req.user.userId,
-    });
+    }).session(session);
 
     if (!course) {
-      return res.status(403).json({ message: "Not authorized" });
+      throw new Error("Not authorized");
     }
 
     // Validate status transition
-    const validTransitions = {
-      upcoming: ["enrolling"],
-      enrolling: ["ongoing"],
-      ongoing: ["completed"],
-      completed: [],
-    };
+    await batch.canTransitionTo(status);
 
-    if (!validTransitions[batch.status].includes(status)) {
-      return res.status(400).json({
-        message: `Cannot transition from ${batch.status} to ${status}`,
-      });
+    // Status-specific checks
+    if (status === "enrolling") {
+      // Check if we can start a new batch
+      const canStart = await course.canStartNewBatch();
+      if (!canStart) {
+        throw new Error("Cannot start enrollment for new batch at this time");
+      }
+
+      // Validate enrollment dates
+      if (currentDate < batch.enrollmentStartDate) {
+        throw new Error("Cannot start enrollment before scheduled date");
+      }
+    }
+
+    if (status === "ongoing") {
+      // Check enrollment period
+      if (currentDate < batch.batchStartDate) {
+        throw new Error("Cannot start batch before scheduled date");
+      }
+
+      // Ensure minimum enrollment
+      if (batch.enrollmentCount === 0) {
+        throw new Error("Cannot start batch with no enrollments");
+      }
+    }
+
+    if (status === "completed") {
+      if (currentDate < batch.batchEndDate) {
+        throw new Error("Cannot complete batch before end date");
+      }
     }
 
     batch.status = status;
-    await batch.save();
+    await batch.save({ session });
+    await session.commitTransaction();
 
     res.json(batch);
   } catch (error) {
-    res.status(500).json({
-      message: "Error updating batch status",
-      error: error.message,
+    await session.abortTransaction();
+    res.status(400).json({
+      message: error.message,
+      details: {
+        currentStatus: batch?.status,
+        requestedStatus: req.body.status,
+        currentDate: new Date(),
+      },
     });
+  } finally {
+    session.endSession();
   }
 };
 
@@ -240,6 +270,14 @@ const getBatchStudents = async (req, res) => {
 const assignTeachers = async (req, res) => {
   try {
     const { teachers } = req.body;
+
+    // Validate teachers array
+    if (!Array.isArray(teachers)) {
+      return res.status(400).json({
+        message: "Teachers must be an array of teacher IDs",
+      });
+    }
+
     const batch = await Batch.findOne({
       _id: req.params.batchId,
       course: req.params.courseId,
@@ -259,10 +297,29 @@ const assignTeachers = async (req, res) => {
       return res.status(403).json({ message: "Not authorized" });
     }
 
+    // Verify all teachers exist, are teachers, and belong to this coordinator
+    const validTeachers = await User.find({
+      _id: { $in: teachers },
+      role: "teacher",
+      coordinator: req.user.userId,
+    });
+
+    if (validTeachers.length !== teachers.length) {
+      return res.status(400).json({
+        message: "One or more teacher IDs are invalid or not authorized",
+      });
+    }
+
     batch.teachers = teachers;
     await batch.save();
 
-    res.json(batch);
+    // Populate teacher details in response
+    const updatedBatch = await Batch.findById(batch._id).populate(
+      "teachers",
+      "username email"
+    );
+
+    res.json(updatedBatch);
   } catch (error) {
     res.status(500).json({
       message: "Error assigning teachers",

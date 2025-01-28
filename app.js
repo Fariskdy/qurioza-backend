@@ -18,8 +18,17 @@ app.use(
 // Authentication routes
 app.use("/api/auth", require("./routes/auth.route.js"));
 
+// Media routes
+app.use("/api/media", require("./routes/media.route.js"));
+
 // Category routes
 app.use("/api/categories", require("./routes/category.route.js"));
+
+// Coordinator routes
+app.use("/api/coordinators", require("./routes/coordinators.route.js"));
+
+// Teacher routes
+app.use("/api/teachers", require("./routes/teachers.route.js"));
 
 // Profile routes
 app.use("/api/profile", require("./routes/profile.route.js"));

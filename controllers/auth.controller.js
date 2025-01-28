@@ -18,7 +18,6 @@ const register = async (req, res) => {
       username,
       email,
       password,
-      role = "student",
       firstName,
       lastName,
       phone = "",
@@ -36,7 +35,7 @@ const register = async (req, res) => {
       username,
       email,
       password, // Will be hashed by pre-save middleware
-      role,
+      role: "student",
     });
 
     // Create user profile

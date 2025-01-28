@@ -24,7 +24,7 @@ router.post("/assignments/:assignmentId", submitAssignment);
 router.post("/quizzes/:quizId", submitQuiz);
 
 // Teacher/Coordinator routes
-router.use(checkRole(["teacher", "course coordinator"]));
+router.use(checkRole("teacher"));
 router.get("/", getBatchSubmissions); // Get all submissions for batch
 router.get("/assignments/:assignmentId", getSubmissions);
 router.get("/quizzes/:quizId", getSubmissions);
