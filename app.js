@@ -18,6 +18,7 @@ app.use(
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
+    exposedHeaders: ['set-cookie']
   })
 );
 
@@ -61,6 +62,11 @@ app.use(
 // Enrollment and submission routes
 app.use("/api/enrollments", require("./routes/enrollment.route.js"));
 app.use("/api/submissions", require("./routes/submission.route.js"));
+
+// Health check endpoint
+app.get('/health', (req, res) => {
+  res.status(200).json({ status: 'ok' });
+});
 
 // Error handling middleware
 app.use((err, req, res, next) => {
