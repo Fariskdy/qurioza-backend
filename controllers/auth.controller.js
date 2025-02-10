@@ -95,7 +95,6 @@ const login = async (req, res) => {
     const refreshToken = generateRefreshToken(user);
 
     // Set tokens in HTTP-only cookies
-    res.header('Access-Control-Allow-Credentials', 'true');
     res.cookie("accessToken", accessToken, cookieOptions);
     res.cookie("refreshToken", refreshToken, refreshCookieOptions);
 
@@ -147,7 +146,6 @@ const refreshToken = async (req, res) => {
     const newRefreshToken = generateRefreshToken(user);
 
     // Set new tokens in cookies
-    res.header('Access-Control-Allow-Credentials', 'true');
     res.cookie("accessToken", accessToken, cookieOptions);
     res.cookie("refreshToken", newRefreshToken, refreshCookieOptions);
 
