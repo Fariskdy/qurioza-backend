@@ -84,7 +84,7 @@ setInterval(cleanupExpiredTokens, CLEANUP_INTERVAL);
 const cookieOptions = {
   httpOnly: true,
   secure: process.env.NODE_ENV === "production", // true in production
-  sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax', // Changed from 'strict'
+  sameSite: process.env.NODE_ENV === "production" ? "none" : "lax", // Changed from 'strict'
   maxAge: 15 * 60 * 1000, // 15 minutes for access token
 };
 
