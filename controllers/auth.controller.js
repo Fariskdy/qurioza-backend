@@ -120,18 +120,17 @@ const refreshToken = async (req, res) => {
   const refreshToken = req.cookies.refreshToken;
 
   if (!refreshToken) {
+    res.clearCookie("accessToken");
+    res.clearCookie("refreshToken");
     return res.status(401).json({ message: "Refresh token is required" });
   }
 
   try {
     const decoded = verifyRefreshToken(refreshToken);
     if (!decoded) {
-      // Clear both cookies if refresh token is invalid
       res.clearCookie("accessToken");
       res.clearCookie("refreshToken");
-      return res
-        .status(403)
-        .json({ message: "Invalid or expired refresh token" });
+      return res.status(403).json({ message: "Invalid refresh token" });
     }
 
     const user = await User.findById(decoded.userId);
@@ -141,41 +140,31 @@ const refreshToken = async (req, res) => {
       return res.status(404).json({ message: "User not found" });
     }
 
-    // Generate new tokens
     const accessToken = generateAccessToken(user);
     const newRefreshToken = generateRefreshToken(user);
 
-    // Set new tokens in cookies
     res.cookie("accessToken", accessToken, cookieOptions);
     res.cookie("refreshToken", newRefreshToken, refreshCookieOptions);
 
-    res.json({
-      message: "Tokens refreshed successfully",
-      user: {
-        id: user._id,
-        username: user.username,
-        email: user.email,
-        role: user.role,
-      },
-    });
+    res.json({ message: "Token refreshed successfully" });
   } catch (error) {
-    console.error("Token refresh error:", error);
     res.clearCookie("accessToken");
     res.clearCookie("refreshToken");
-    res.status(403).json({ message: "Invalid or expired refresh token" });
+    res.status(403).json({ message: "Invalid refresh token" });
   }
 };
 
 const logout = async (req, res) => {
   try {
-    const token = req.cookies.accessToken;
-    if (token) {
-      invalidateToken(token);
-    }
-
-    // Clear cookies
-    res.clearCookie("accessToken");
-    res.clearCookie("refreshToken");
+    // Clear cookies with same options they were set with
+    res.clearCookie("accessToken", {
+      ...cookieOptions,
+      maxAge: 0,
+    });
+    res.clearCookie("refreshToken", {
+      ...refreshCookieOptions,
+      maxAge: 0,
+    });
 
     res.json({ message: "Logged out successfully" });
   } catch (error) {
