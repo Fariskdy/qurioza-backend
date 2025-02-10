@@ -5,6 +5,10 @@ require("dotenv").config();
 const cors = require("cors");
 const { connectDB } = require("./config/connectDB");
 
+// Import schedulers
+require("./schedulers/batchStatusUpdater");
+require("./schedulers/mediaCleanup");
+
 // Middleware
 app.use(express.json());
 app.use(cookieParser());
@@ -20,6 +24,9 @@ app.use("/api/auth", require("./routes/auth.route.js"));
 
 // Media routes
 app.use("/api/media", require("./routes/media.route.js"));
+
+// Stream routes
+app.use("/api/stream", require("./routes/stream.route.js"));
 
 // Category routes
 app.use("/api/categories", require("./routes/category.route.js"));

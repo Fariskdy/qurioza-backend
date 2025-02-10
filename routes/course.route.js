@@ -12,6 +12,12 @@ const {
   deleteCourse,
   getMyCourses,
   publishCourse,
+  getRelatedCourses,
+  getFeaturedCourses,
+  getStats,
+  updateCourseImage,
+  updateCourseVideo,
+  getStudentCourses,
 } = require("../controllers/course.controller");
 
 const router = express.Router();
@@ -19,11 +25,20 @@ const router = express.Router();
 // Create upload middleware for courses (both images and videos allowed)
 const courseUpload = createUploadMiddleware(["image", "video"]);
 
-// Public routes
+// Public routes - Order matters! Put specific routes before parameterized routes
+router.get("/stats", getStats);
+router.get("/featured", getFeaturedCourses);
 router.get("/", getCourses);
+router.get("/:slug/related", getRelatedCourses);
 router.get("/:slug", getCourse);
 
-// Coordinator only routes with file upload
+// Handle batch routes before applying coordinator middleware
+router.use("/:courseId/batches", require("./batch.route.js"));
+router.use("/:courseId/modules", require("./module.route.js"));
+
+router.get("/student/my-courses", authenticateToken, checkRole("student"), getStudentCourses);
+
+// Coordinator only routes
 router.use(authenticateToken, checkRole("course coordinator"));
 router.get("/coordinator/my-courses", getMyCourses);
 
@@ -47,7 +62,18 @@ router.put(
   updateCourse
 );
 
+router.put(
+  "/:id/image",
+  courseUpload.fields([{ name: "image", maxCount: 1 }]),
+  updateCourseImage
+);
+
+router.put("/:id/video", updateCourseVideo);
+
 router.delete("/:id", deleteCourse);
 router.patch("/:id/publish", publishCourse);
+
+
+
 
 module.exports = router;

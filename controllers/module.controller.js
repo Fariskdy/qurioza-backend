@@ -4,8 +4,12 @@ const Media = require("../models/media.model");
 const {
   uploadToCloudinary,
   deleteFromCloudinary,
+  cloudinary,
 } = require("../config/cloudinary");
 const mongoose = require("mongoose");
+const jwt = require("jsonwebtoken");
+const Enrollment = require("../models/enrollment.model");
+const Batch = require("../models/batch.model");
 
 // MODULE FUNCTIONS
 
@@ -72,8 +76,8 @@ const createModule = async (req, res) => {
       course: req.params.courseId,
       coordinator: req.user.userId,
       order: newOrder,
-      learningObjectives: req.body.learningObjectives,
-      requirements: req.body.requirements,
+      status: req.body.status || "draft",
+      isOptional: req.body.isOptional || false,
       content: [], // Start with empty content
     };
 
@@ -106,8 +110,9 @@ const updateModule = async (req, res) => {
       description: req.body.description,
       duration: parseInt(req.body.duration),
       lectureCount: parseInt(req.body.lectureCount),
-      learningObjectives: JSON.parse(req.body.learningObjectives),
-      requirements: JSON.parse(req.body.requirements),
+      status: req.body.status,
+      isOptional: req.body.isOptional,
+      updatedAt: Date.now(),
     };
 
     Object.assign(module, updates);
@@ -124,91 +129,37 @@ const updateModule = async (req, res) => {
 // Delete module with enhanced cleanup
 const deleteModule = async (req, res) => {
   const session = await mongoose.startSession();
+  session.startTransaction();
+
   try {
-    await session.withTransaction(async () => {
-      const module = await Module.findOne({
-        _id: req.params.moduleId,
-        course: req.params.courseId,
-        coordinator: req.user.userId,
-      }).session(session);
-
-      if (!module) {
-        throw new Error("Module not found");
-      }
-
-      // Enhanced cleanup for each content item
-      const cleanupPromises = module.content.map(async (item) => {
-        if (!item.publicId) return;
-
-        try {
-          if (item.type === "video") {
-            // Get the media document first
-            const mediaDoc = await Media.findOne({
-              publicId: item.publicId,
-            }).session(session);
-
-            if (mediaDoc) {
-              // Delete from Cloudinary first
-              try {
-                console.log(`Attempting to delete video: ${item.publicId}`);
-                const deleteResult = await cloudinary.uploader.destroy(
-                  item.publicId,
-                  {
-                    resource_type: "video",
-                    invalidate: true,
-                  }
-                );
-                console.log("Video deletion result:", deleteResult);
-              } catch (cloudinaryError) {
-                console.error(
-                  "Cloudinary video deletion error:",
-                  cloudinaryError
-                );
-                throw cloudinaryError;
-              }
-
-              // Then delete the Media document
-              await Media.findOneAndDelete({
-                publicId: item.publicId,
-              }).session(session);
-            }
-          } else if (item.type === "document") {
-            // Delete document from Cloudinary
-            await deleteFromCloudinary(item.publicId, "raw");
-          }
-
-          // Clean up any associated resources
-          if (item.resources && item.resources.length > 0) {
-            const resourceCleanup = item.resources.map((resource) =>
-              resource.publicId
-                ? deleteFromCloudinary(resource.publicId, "raw")
-                : Promise.resolve()
-            );
-            await Promise.all(resourceCleanup);
-          }
-        } catch (error) {
-          console.error(`Cleanup error for content ${item._id}:`, error);
-          throw error; // Propagate error to trigger transaction rollback
-        }
-      });
-
-      await Promise.all(cleanupPromises);
-
-      // Delete the module
-      await Module.deleteOne({ _id: module._id }).session(session);
-
-      // Reorder remaining modules
-      await Module.updateMany(
-        { course: req.params.courseId, order: { $gt: module.order } },
-        { $inc: { order: -1 } }
-      ).session(session);
+    const module = await Module.findOne({
+      _id: req.params.moduleId,
+      course: req.params.courseId,
+      coordinator: req.user.userId,
     });
 
-    res.json({
-      message: "Module and all associated content deleted successfully",
-    });
+    if (!module) {
+      return res.status(404).json({ message: "Module not found" });
+    }
+
+    // Find and delete all associated media
+    const mediaToDelete = await Media.find({
+      "associatedWith.model": "Module",
+      "associatedWith.id": module._id,
+    }).session(session);
+
+    // Delete each media document (which will trigger the pre-deleteOne hook)
+    for (const media of mediaToDelete) {
+      await media.deleteOne({ session });
+    }
+
+    // Delete the module
+    await module.deleteOne({ session });
+
+    await session.commitTransaction();
+    res.json({ message: "Module deleted successfully" });
   } catch (error) {
-    console.error("Delete error:", error);
+    await session.abortTransaction();
     res.status(500).json({
       message: "Error deleting module",
       error: error.message,
@@ -222,79 +173,55 @@ const deleteModule = async (req, res) => {
 const reorderModule = async (req, res) => {
   const session = await mongoose.startSession();
   try {
-    session.startTransaction();
+    await session.withTransaction(async () => {
+      const { newOrder } = req.body;
+      const module = await Module.findOne({
+        _id: req.params.moduleId,
+        course: req.params.courseId,
+        coordinator: req.user.userId,
+      }).session(session);
 
-    const { newOrder } = req.body;
+      if (!module) {
+        throw new Error("Module not found");
+      }
 
-    // Validate newOrder
-    if (typeof newOrder !== "number" || newOrder < 0) {
-      await session.abortTransaction();
-      return res.status(400).json({
-        message: "Invalid order value",
-        code: "INVALID_ORDER",
-      });
-    }
+      const oldOrder = module.order;
 
-    const module = await Module.findOne({
-      _id: req.params.moduleId,
+      // If moving down the list
+      if (newOrder > oldOrder) {
+        await Module.updateMany(
+          {
+            course: req.params.courseId,
+            order: { $gt: oldOrder, $lte: newOrder },
+          },
+          { $inc: { order: -1 } },
+          { session }
+        );
+      }
+      // If moving up the list
+      else if (newOrder < oldOrder) {
+        await Module.updateMany(
+          {
+            course: req.params.courseId,
+            order: { $gte: newOrder, $lt: oldOrder },
+          },
+          { $inc: { order: 1 } },
+          { session }
+        );
+      }
+
+      // Update the dragged module's order
+      module.order = newOrder;
+      await module.save({ session });
+    });
+
+    // Fetch updated modules list
+    const updatedModules = await Module.find({
       course: req.params.courseId,
-      coordinator: req.user.userId,
-    }).session(session);
+    }).sort({ order: 1 });
 
-    if (!module) {
-      await session.abortTransaction();
-      return res.status(404).json({ message: "Module not found" });
-    }
-
-    const oldOrder = module.order;
-
-    // Check if order is actually changing
-    if (oldOrder === newOrder) {
-      await session.abortTransaction();
-      return res.json(module);
-    }
-
-    // Get max order to validate newOrder
-    const maxOrder = await Module.countDocuments({
-      course: req.params.courseId,
-    }).session(session);
-
-    if (newOrder >= maxOrder) {
-      await session.abortTransaction();
-      return res.status(400).json({
-        message: "Order exceeds module count",
-        code: "INVALID_ORDER",
-      });
-    }
-
-    if (newOrder > oldOrder) {
-      await Module.updateMany(
-        {
-          course: req.params.courseId,
-          order: { $gt: oldOrder, $lte: newOrder },
-        },
-        { $inc: { order: -1 } },
-        { session }
-      );
-    } else {
-      await Module.updateMany(
-        {
-          course: req.params.courseId,
-          order: { $gte: newOrder, $lt: oldOrder },
-        },
-        { $inc: { order: 1 } },
-        { session }
-      );
-    }
-
-    module.order = newOrder;
-    await module.save({ session });
-
-    await session.commitTransaction();
-    res.json(module);
+    res.json(updatedModules);
   } catch (error) {
-    await session.abortTransaction();
-    console.error("Reorder error:", error);
     res.status(500).json({
       message: "Error reordering module",
       error: error.message,
@@ -323,13 +250,17 @@ const addModuleContent = async (req, res) => {
         throw new Error("Module not found");
       }
 
+      // Parse content data from request body
+      const contentData = JSON.parse(req.body.content);
+
+      // Add moduleId to contentData
+      contentData.moduleId = module._id;
+
       // Get highest order number for content
       const lastContent =
         module.content.length > 0
           ? Math.max(...module.content.map((item) => item.order))
           : -1;
-
-      const contentData = JSON.parse(req.body.content);
       contentData.order = lastContent + 1;
 
       const contentItem = await processContentItem(
@@ -345,6 +276,7 @@ const addModuleContent = async (req, res) => {
       res.status(201).json(contentItem);
     });
   } catch (error) {
+    console.error("Add content error:", error);
     await cleanupOnFailure(uploadedFiles);
     res.status(500).json({
       message: "Error adding content",
@@ -358,8 +290,6 @@ const addModuleContent = async (req, res) => {
 // Update content item
 const updateModuleContent = async (req, res) => {
   const session = await mongoose.startSession();
-  const uploadedFiles = [];
-
   try {
     await session.withTransaction(async () => {
       const module = await Module.findOne({
@@ -380,51 +310,25 @@ const updateModuleContent = async (req, res) => {
         throw new Error("Content item not found");
       }
 
-      // Clean up old files if necessary
-      const oldContent = module.content[contentIndex];
-      if (oldContent.publicId) {
-        if (oldContent.type === "video") {
-          await Media.findOneAndUpdate(
-            { publicId: oldContent.publicId },
-            { $unset: { associatedWith: "" } }
-          );
-        } else if (oldContent.type === "document") {
-          try {
-            const publicId = oldContent.publicId;
-            console.log("Attempting to delete document:", publicId);
-            const deleteResult = await deleteFromCloudinary(publicId, "raw");
-            console.log("Document deletion result:", deleteResult);
-          } catch (error) {
-            console.error("Document deletion error:", error);
-            throw new Error(`Failed to delete old document: ${error.message}`);
-          }
-        }
+      const contentItem = module.content[contentIndex];
+      const updateData = req.body;
+
+      // Only allow updating title for all types
+      if (updateData.title) {
+        contentItem.title = updateData.title;
       }
 
-      const contentData = JSON.parse(req.body.content);
-      contentData.order = oldContent.order; // Maintain same order
+      // Allow URL update only for link type
+      if (contentItem.type === "link" && updateData.url) {
+        contentItem.url = updateData.url;
+      }
 
-      const processedContent = await processContentItem(
-        contentData,
-        req.files,
-        req.user.userId,
-        uploadedFiles
-      );
-
-      // Preserve the _id and update other fields
-      const updatedContent = {
-        ...processedContent,
-        _id: oldContent._id, // Preserve the original _id
-      };
-
-      // Update the content item while preserving _id
-      module.content.set(contentIndex, updatedContent);
       await module.save({ session });
 
-      res.json(updatedContent);
+      res.json(contentItem);
     });
   } catch (error) {
-    await cleanupOnFailure(uploadedFiles);
+    console.error("Update content error:", error);
     res.status(500).json({
       message: "Error updating content",
       error: error.message,
@@ -439,16 +343,7 @@ const reorderModuleContent = async (req, res) => {
   const session = await mongoose.startSession();
   try {
     await session.withTransaction(async () => {
-      // Parse newOrder as a number
-      const newOrder = parseInt(req.body.newOrder);
-
-      // Validate newOrder is a number and non-negative
-      if (isNaN(newOrder) || newOrder < 0) {
-        return res.status(400).json({
-          message: "Invalid order value - must be a non-negative number",
-          code: "INVALID_ORDER",
-        });
-      }
+      const { newOrder } = req.body;
 
       const module = await Module.findOne({
         _id: req.params.moduleId,
@@ -457,62 +352,52 @@ const reorderModuleContent = async (req, res) => {
       }).session(session);
 
       if (!module) {
-        return res.status(404).json({ message: "Module not found" });
+        throw new Error("Module not found");
       }
 
-      // Add debug log
-      console.log("Current content:", module.content);
-
+      // Find the content item to move
       const contentIndex = module.content.findIndex(
         (item) => item._id.toString() === req.params.contentId
       );
 
       if (contentIndex === -1) {
-        return res.status(404).json({ message: "Content item not found" });
+        throw new Error("Content item not found");
       }
 
-      const oldOrder = module.content[contentIndex].order;
-      const totalContent = module.content.length;
+      const content = module.content[contentIndex];
+      const oldOrder = content.order;
 
-      // Validate new order is within bounds
-      if (newOrder >= totalContent) {
-        return res.status(400).json({
-          message: `Order must be between 0 and ${totalContent - 1}`,
-          code: "INVALID_ORDER",
-        });
-      }
-
-      // Check if order is actually changing
+      // Skip if order hasn't changed
       if (oldOrder === newOrder) {
-        return res.json(module.content[contentIndex]);
+        return res.json(content);
       }
 
-      // Update orders
+      // Update orders of other content items
       module.content.forEach((item) => {
         if (newOrder > oldOrder) {
-          // Moving item to a later position
+          // Moving down: decrease order of items between old and new position
           if (item.order > oldOrder && item.order <= newOrder) {
             item.order--;
           }
         } else {
-          // Moving item to an earlier position
+          // Moving up: increase order of items between new and old position
           if (item.order >= newOrder && item.order < oldOrder) {
             item.order++;
           }
         }
       });
 
-      // Set new order for the target item
-      module.content[contentIndex].order = newOrder;
+      // Set new order for the moved item
+      content.order = newOrder;
 
-      // Save changes
+      // Sort content array by order
+      module.content.sort((a, b) => a.order - b.order);
+
       await module.save({ session });
-
-      // Return reordered content
-      res.json(module.content[contentIndex]);
+      res.json(module);
     });
   } catch (error) {
-    console.error("Reorder error:", error);
+    console.error("Reorder content error:", error);
     res.status(500).json({
       message: "Error reordering content",
       error: error.message,
@@ -548,16 +433,29 @@ const deleteModuleContent = async (req, res) => {
       const deletedContent = module.content[contentIndex];
       const deletedOrder = deletedContent.order;
 
-      // Cleanup content files
-      if (deletedContent.publicId) {
-        if (deletedContent.type === "video") {
-          await Media.findOneAndUpdate(
-            { publicId: deletedContent.publicId },
-            { $unset: { associatedWith: "" } }
+      // Enhanced cleanup for video content
+      if (deletedContent.type === "video" && deletedContent.publicId) {
+        try {
+          // Delete from Cloudinary
+          console.log(`Attempting to delete video: ${deletedContent.publicId}`);
+          const deleteResult = await deleteFromCloudinary(
+            deletedContent.publicId,
+            "video"
           );
-        } else {
-          await deleteFromCloudinary(deletedContent.publicId, "raw");
+          console.log("Video deletion result:", deleteResult);
+
+          // Delete the Media record
+          await Media.findOneAndDelete({
+            publicId: deletedContent.publicId,
+          }).session(session);
+        } catch (error) {
+          console.error("Error deleting video:", error);
+          throw new Error(`Failed to delete video: ${error.message}`);
         }
+      }
+      // Handle document deletion as before
+      else if (deletedContent.type === "document" && deletedContent.publicId) {
+        await deleteFromCloudinary(deletedContent.publicId, "raw");
       }
 
       // Remove content and update orders
@@ -571,9 +469,14 @@ const deleteModuleContent = async (req, res) => {
       });
 
       await module.save({ session });
-      res.json({ message: "Content deleted successfully" });
+      res.json({
+        message: "Content deleted successfully",
+        contentId: req.params.contentId,
+        moduleId: module._id,
+      });
     });
   } catch (error) {
+    console.error("Delete content error:", error);
     res.status(500).json({
       message: "Error deleting content",
       error: error.message,
@@ -617,30 +520,52 @@ const processContentItem = async (
       throw new Error("Video media not found or not ready");
     }
 
+    // Associate media with module
+    await Media.findByIdAndUpdate(media._id, {
+      associatedWith: {
+        model: "Module",
+        id: contentData.moduleId, // We need to pass moduleId in contentData
+      },
+    });
+
     processedItem.url = media.url;
     processedItem.publicId = media.publicId;
     processedItem.thumbnail = media.thumbnail;
     processedItem.size = media.size;
     processedItem.mimeType = media.mimeType;
   } else if (contentData.type === "document") {
-    const file = files.find((f) => f.fieldname === contentData.uniqueId);
+    // Log the files to debug
+    console.log("Files received:", files);
+    console.log("Looking for file with uniqueId:", contentData.uniqueId);
+
+    const file = files?.find((f) => f.fieldname === contentData.uniqueId);
     if (!file) {
       throw new Error("Document file not found");
     }
 
-    const result = await uploadToCloudinary(
-      file.buffer,
-      "moduleDocument",
-      file.mimetype
-    );
+    try {
+      const result = await uploadToCloudinary(
+        file.buffer,
+        "moduleDocument",
+        file.mimetype
+      );
 
-    processedItem.url = result.secure_url;
-    processedItem.publicId = result.public_id;
-    processedItem.size = file.size;
-    processedItem.mimeType = file.mimetype;
-    processedItem.fileExtension = result.fileType.extension;
-    processedItem.originalName = file.originalname;
-    uploadedFiles.push({ publicId: result.public_id });
+      processedItem.url = result.secure_url;
+      processedItem.publicId = result.public_id;
+      processedItem.size = file.size;
+      processedItem.mimeType = file.mimetype;
+      processedItem.fileExtension = result.format;
+      processedItem.originalName = file.originalname;
+      uploadedFiles.push({ publicId: result.public_id });
+    } catch (error) {
+      console.error("Document upload error:", error);
+      throw new Error(`Failed to upload document: ${error.message}`);
+    }
+  } else if (contentData.type === "link") {
+    if (!contentData.url) {
+      throw new Error("URL is required for link content");
+    }
+    processedItem.url = contentData.url;
   }
 
   return processedItem;
@@ -700,6 +625,195 @@ const getModuleContentItem = async (req, res) => {
   }
 };
 
+// Add video duration calculation helper function
+const getVideoDuration = async (filePath) => {
+  // TODO: Implement video duration calculation
+  // For now, return a default value
+  return 0;
+};
+
+// Add uniqueId generator function
+const generateUniqueId = () => {
+  return Date.now().toString(36) + Math.random().toString(36).substr(2);
+};
+
+// Add this function
+const getSecureContentUrl = async (req, res) => {
+  try {
+    const module = await Module.findOne({
+      _id: req.params.moduleId,
+      course: req.params.courseId,
+    });
+
+    if (!module) {
+      return res.status(404).json({ message: "Module not found" });
+    }
+
+    const contentItem = module.content.find(
+      (item) => item._id.toString() === req.params.contentId
+    );
+
+    if (!contentItem) {
+      return res.status(404).json({ message: "Content not found" });
+    }
+
+    // Generate a short-lived token for this specific content
+    const streamToken = jwt.sign(
+      {
+        contentId: contentItem._id,
+        moduleId: module._id,
+        courseId: req.params.courseId,
+        timestamp: Date.now(),
+      },
+      process.env.JWT_SECRET,
+      { expiresIn: "1h" }
+    );
+
+    // Instead of direct Cloudinary URL, return our proxy endpoint
+    const baseUrl = process.env.API_URL || "http://localhost:3000";
+    const proxyUrl = `${baseUrl}/api/stream/${streamToken}`;
+
+    res.json({
+      url: proxyUrl,
+      thumbnail: contentItem.thumbnail,
+      type: contentItem.type,
+      duration: contentItem.duration,
+      mimeType: contentItem.mimeType,
+    });
+  } catch (error) {
+    console.error("Error generating secure URL:", error);
+    res.status(500).json({
+      message: "Error generating secure URL",
+      error: error.message,
+    });
+  }
+};
+
+// Public access - limited data
+const getPublicModules = async (req, res) => {
+  try {
+    const modules = await Module.find({
+      course: req.params.courseId,
+      status: "published",
+    })
+      .sort({ order: 1 })
+      .select(
+        "title description order status isOptional duration lectureCount content"
+      )
+      .lean();
+
+    // Transform content to only show preview items and basic info
+    const publicModules = modules.map((module) => ({
+      ...module,
+      content: (module.content || [])
+        .map((item) => ({
+          _id: item._id,
+          title: item.title,
+          type: item.type,
+          duration: item.duration,
+          isPreview: item.isPreview,
+          order: item.order,
+          // Exclude sensitive data like url, publicId, etc.
+        }))
+        .sort((a, b) => a.order - b.order),
+    }));
+
+    res.json(publicModules);
+  } catch (error) {
+    console.error("Error in getPublicModules:", error);
+    res.status(500).json({
+      message: "Error fetching public modules",
+      error: error.message,
+    });
+  }
+};
+
+// Enrolled student access - secure URLs
+const getEnrolledModules = async (req, res) => {
+  try {
+    // First verify enrollment through Batch and Enrollment models
+    const activeEnrollment = await Enrollment.findOne({
+      student: req.user.userId,
+      status: "active",
+      batch: {
+        $in: await Batch.find({
+          course: req.params.courseId,
+          status: { $in: ["enrolling","ongoing", "completed"] },
+        }).select("_id"),
+      },
+    }).populate("batch");
+
+    if (!activeEnrollment) {
+      return res.status(403).json({
+        message:
+          "You must be enrolled in an active batch to access this course's modules",
+      });
+    }
+
+    // Get modules based on batch status and dates
+    const modules = await Module.find({
+      course: req.params.courseId,
+      status: "published",
+    })
+      .sort({ order: 1 })
+      .lean();
+
+    // Transform content to include secure URLs and respect batch-specific settings
+    const enrolledModules = modules.map((module) => ({
+      ...module,
+      content: module.content
+        .filter((item) => {
+          // Check batch-specific settings
+          if (item.batchSpecificSettings?.isEnabled === false) {
+            return false;
+          }
+
+          // Check if content is available based on batch dates
+          if (item.batchSpecificSettings?.visibleFromDate) {
+            return (
+              new Date(item.batchSpecificSettings.visibleFromDate) <= new Date()
+            );
+          }
+
+          return true;
+        })
+        .map((item) => ({
+          _id: item._id,
+          title: item.title,
+          type: item.type,
+          duration: item.duration,
+          isPreview: item.isPreview,
+          order: item.order,
+          thumbnail: item.thumbnail,
+          completedInBatch: activeEnrollment.completedModules.includes(
+            module._id
+          ),
+          // Instead of direct URL, provide endpoint for secure access
+          secureUrlEndpoint: `/api/courses/${req.params.courseId}/modules/${module._id}/content/${item._id}/secure-view`,
+        })),
+    }));
+
+    // Add progress information
+    const response = {
+      modules: enrolledModules,
+      progress: {
+        overall: activeEnrollment.progress,
+        completedModules: activeEnrollment.completedModules,
+        batchStatus: activeEnrollment.batch.status,
+        batchEndDate: activeEnrollment.batch.batchEndDate,
+      },
+    };
+
+    res.json(response);
+  } catch (error) {
+    console.error("Error in getEnrolledModules:", error);
+    res.status(500).json({
+      message: "Error fetching enrolled modules",
+      error: error.message,
+    });
+  }
+};
+
 module.exports = {
   getModules,
   getModule,
@@ -713,4 +827,7 @@ module.exports = {
   reorderModuleContent,
   deleteModuleContent,
   updateModuleContent,
+  getSecureContentUrl,
+  getPublicModules,
+  getEnrolledModules,
 };

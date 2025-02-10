@@ -5,12 +5,50 @@ const mongoose = require("mongoose");
 // Get all teachers for the logged-in coordinator
 const getTeachers = async (req, res) => {
   try {
+    // Get teachers from User model
     const teachers = await User.find({
       role: "teacher",
       coordinator: req.user.userId,
-    }).select("-password");
-    res.json(teachers);
+    })
+      .select("-password")
+      .lean();
+
+    // Get profiles for all teachers
+    const teacherProfiles = await Profile.find({
+      user: { $in: teachers.map((t) => t._id) },
+    }).lean();
+
+    // Merge teacher and profile data, ensuring we keep the user _id
+    const teachersWithProfiles = teachers.map((teacher) => {
+      const profile = teacherProfiles.find(
+        (p) => p.user.toString() === teacher._id.toString()
+      );
+
+      // Create merged object with explicit _id from User model
+      const mergedTeacher = {
+        _id: teacher._id,
+        username: teacher.username,
+        email: teacher.email,
+        role: teacher.role,
+        coordinator: teacher.coordinator,
+        // Add profile fields if they exist
+        firstName: profile?.firstName || "",
+        lastName: profile?.lastName || "",
+        phone: profile?.phone || "",
+        address: profile?.address || "",
+        // Explicitly exclude profile fields we don't want
+        user: undefined,
+        __v: undefined,
+        createdAt: undefined,
+        updatedAt: undefined,
+      };
+
+      return mergedTeacher;
+    });
+
+    res.json(teachersWithProfiles);
   } catch (error) {
+    console.error("Error in getTeachers:", error);
     res.status(500).json({
       message: "Error retrieving teachers",
       error: error.message,
@@ -25,14 +63,34 @@ const getTeacher = async (req, res) => {
       _id: req.params.id,
       role: "teacher",
       coordinator: req.user.userId,
-    }).select("-password");
+    })
+      .select("-password")
+      .lean();
 
     if (!teacher) {
       return res.status(404).json({ message: "Teacher not found" });
     }
 
-    res.json(teacher);
+    // Get teacher's profile
+    const profile = await Profile.findOne({ user: teacher._id }).lean();
+
+    // Merge teacher and profile data with explicit field selection
+    const teacherWithProfile = {
+      _id: teacher._id,
+      username: teacher.username,
+      email: teacher.email,
+      role: teacher.role,
+      coordinator: teacher.coordinator,
+      // Add profile fields if they exist
+      firstName: profile?.firstName || "",
+      lastName: profile?.lastName || "",
+      phone: profile?.phone || "",
+      address: profile?.address || "",
+    };
+
+    res.json(teacherWithProfile);
   } catch (error) {
+    console.error("Error in getTeacher:", error);
     res.status(500).json({
       message: "Error retrieving teacher details",
       error: error.message,

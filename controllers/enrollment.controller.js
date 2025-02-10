@@ -55,6 +55,13 @@ const getEnrollment = async (req, res) => {
 // Enroll in a batch
 const enrollInBatch = async (req, res) => {
   try {
+    // Add role check
+    if (req.user.role !== "student") {
+      return res.status(403).json({
+        message: "Only students can enroll in courses",
+      });
+    }
+
     const batch = await Batch.findById(req.params.batchId);
     if (!batch) {
       return res.status(404).json({ message: "Batch not found" });
@@ -108,6 +115,11 @@ const enrollInBatch = async (req, res) => {
     // Update course stats
     await Course.findByIdAndUpdate(batch.course, {
       $inc: { "stats.enrolledStudents": 1 },
+    });
+
+    // Update batch stats
+    await Batch.findByIdAndUpdate(batch._id, {
+      $inc: { enrollmentCount: 1 },
     });
 
     res.status(201).json(enrollment);

@@ -19,6 +19,7 @@ const CourseSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: "Category",
     required: true,
+    index: true,
   },
   coordinator: {
     type: mongoose.Schema.Types.ObjectId,
@@ -37,10 +38,19 @@ const CourseSchema = new mongoose.Schema({
     type: Number,
     required: true,
   },
-  image: String,
+  image: {
+    type: String,
+    required: false, // Optional
+  },
   previewVideo: {
-    url: String,
-    thumbnail: String,
+    url: {
+      type: String,
+      required: false,
+    },
+    thumbnail: {
+      type: String,
+      required: false,
+    },
   },
   level: {
     type: String,
@@ -115,6 +125,10 @@ const CourseSchema = new mongoose.Schema({
   updatedAt: {
     type: Date,
     default: Date.now,
+  },
+  featured: {
+    type: Boolean,
+    default: false,
   },
 });
 

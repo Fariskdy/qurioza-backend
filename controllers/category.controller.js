@@ -1,5 +1,9 @@
 const Category = require("../models/category.model");
-const cloudinary = require("../config/cloudinary");
+const {
+  uploadToCloudinary,
+  deleteFromCloudinary,
+} = require("../config/cloudinary");
+const mongoose = require("mongoose");
 
 // Get all categories
 const getCategories = async (req, res) => {
@@ -32,6 +36,10 @@ const getCategory = async (req, res) => {
 
 // Create new category
 const createCategory = async (req, res) => {
+  // Start a new session for transaction
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
   try {
     const { name, description } = req.body;
 
@@ -43,31 +51,28 @@ const createCategory = async (req, res) => {
     }
 
     // Check for existing category
-    const existingCategory = await Category.findOne({ name });
+    const existingCategory = await Category.findOne({ name }).session(session);
     if (existingCategory) {
+      await session.abortTransaction();
       return res.status(400).json({ message: "Category already exists" });
     }
 
     let imageUrl = "";
     let imagePublicId = "";
 
-    // Handle image upload
+    // Handle image upload using new system
     if (req.file) {
       try {
-        const result = await new Promise((resolve, reject) => {
-          const uploadStream = cloudinary.uploader.upload_stream(
-            { folder: "categories" },
-            (error, result) => {
-              if (error) reject(error);
-              else resolve(result);
-            }
-          );
-          uploadStream.end(req.file.buffer);
-        });
+        const result = await uploadToCloudinary(
+          req.file.buffer,
+          "categoryImage",
+          req.file.mimetype
+        );
 
         imageUrl = result.secure_url;
         imagePublicId = result.public_id;
       } catch (uploadError) {
+        await session.abortTransaction();
         return res.status(500).json({
           message: "Image upload failed",
           error: uploadError.message,
@@ -83,59 +88,71 @@ const createCategory = async (req, res) => {
       imagePublicId,
     });
 
-    const savedCategory = await category.save();
+    const savedCategory = await category.save({ session });
+
+    // Commit the transaction
+    await session.commitTransaction();
     res.status(201).json(savedCategory);
   } catch (error) {
+    // Rollback the transaction on error
+    await session.abortTransaction();
     res.status(500).json({
       message: "Error creating category",
       error: error.message,
     });
+  } finally {
+    session.endSession();
   }
 };
 
 // Update category
 const updateCategory = async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
   try {
     const { name, description, status } = req.body;
-    const category = await Category.findById(req.params.id);
+    const category = await Category.findById(req.params.id).session(session);
 
     if (!category) {
+      await session.abortTransaction();
       return res.status(404).json({ message: "Category not found" });
     }
 
     // Check name uniqueness if changing name
     if (name && name !== category.name) {
-      const existingCategory = await Category.findOne({ name });
+      const existingCategory = await Category.findOne({ name }).session(
+        session
+      );
       if (existingCategory) {
+        await session.abortTransaction();
         return res
           .status(400)
           .json({ message: "Category name already exists" });
       }
     }
 
-    // Handle image update
+    let oldImagePublicId = null;
+
+    // Handle image update using new system
     if (req.file) {
       try {
         // Upload new image
-        const result = await new Promise((resolve, reject) => {
-          const uploadStream = cloudinary.uploader.upload_stream(
-            { folder: "categories" },
-            (error, result) => {
-              if (error) reject(error);
-              else resolve(result);
-            }
-          );
-          uploadStream.end(req.file.buffer);
-        });
+        const result = await uploadToCloudinary(
+          req.file.buffer,
+          "categoryImage",
+          req.file.mimetype
+        );
 
-        // Delete old image if exists
+        // Store old image id for deletion after successful transaction
         if (category.imagePublicId) {
-          await cloudinary.uploader.destroy(category.imagePublicId);
+          oldImagePublicId = category.imagePublicId;
         }
 
         category.image = result.secure_url;
         category.imagePublicId = result.public_id;
       } catch (uploadError) {
+        await session.abortTransaction();
         return res.status(500).json({
           message: "Image upload failed",
           error: uploadError.message,
@@ -148,37 +165,65 @@ const updateCategory = async (req, res) => {
     category.description = description || category.description;
     category.status = status || category.status;
 
-    const updatedCategory = await category.save();
+    const updatedCategory = await category.save({ session });
+
+    // Commit the transaction
+    await session.commitTransaction();
+
+    // Delete old image after successful transaction
+    if (oldImagePublicId) {
+      await deleteFromCloudinary(oldImagePublicId).catch(console.error);
+    }
+
     res.json(updatedCategory);
   } catch (error) {
+    // Rollback the transaction on error
+    await session.abortTransaction();
     res.status(500).json({
       message: "Error updating category",
       error: error.message,
     });
+  } finally {
+    session.endSession();
   }
 };
 
 // Delete category
 const deleteCategory = async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
   try {
-    const category = await Category.findById(req.params.id);
+    const category = await Category.findById(req.params.id).session(session);
 
     if (!category) {
+      await session.abortTransaction();
       return res.status(404).json({ message: "Category not found" });
     }
 
-    // Delete associated image
-    if (category.imagePublicId) {
-      await cloudinary.uploader.destroy(category.imagePublicId);
+    const imagePublicId = category.imagePublicId;
+
+    // Delete from database first
+    await category.deleteOne({ session });
+
+    // Commit the transaction
+    await session.commitTransaction();
+
+    // Delete associated image after successful transaction
+    if (imagePublicId) {
+      await deleteFromCloudinary(imagePublicId).catch(console.error);
     }
 
-    await category.deleteOne();
     res.json({ message: "Category deleted successfully" });
   } catch (error) {
+    // Rollback the transaction on error
+    await session.abortTransaction();
     res.status(500).json({
       message: "Error deleting category",
       error: error.message,
     });
+  } finally {
+    session.endSession();
   }
 };
 

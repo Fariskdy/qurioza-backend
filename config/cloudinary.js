@@ -5,6 +5,8 @@ cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
   api_key: process.env.CLOUDINARY_API_KEY,
   api_secret: process.env.CLOUDINARY_API_SECRET,
+  secure: true,
+  private_cdn: false,
 });
 
 // Simplify upload configs
@@ -12,10 +14,22 @@ const UPLOAD_CONFIGS = {
   categoryImage: {
     folder: "categories",
     resourceType: "image",
+    allowedTypes: ["image/jpeg", "image/png", "image/webp"],
+    fileExtensions: {
+      "image/jpeg": "jpg",
+      "image/png": "png",
+      "image/webp": "webp",
+    },
   },
   courseImage: {
     folder: "courses/images",
     resourceType: "image",
+    allowedTypes: ["image/jpeg", "image/png", "image/webp"],
+    fileExtensions: {
+      "image/jpeg": "jpg",
+      "image/png": "png",
+      "image/webp": "webp",
+    },
   },
   courseVideo: {
     folder: "courses/videos",
@@ -86,13 +100,21 @@ const uploadToCloudinary = async (
 ) => {
   const uploadWithRetry = async (attempt = 1) => {
     try {
-      // Validate mime type
-      if (!UPLOAD_CONFIGS[uploadType].allowedTypes.includes(mimetype)) {
-        throw new Error(`Unsupported file type: ${mimetype}`);
+      // First validate uploadType exists
+      if (!UPLOAD_CONFIGS[uploadType]) {
+        throw new Error(`Invalid upload type: ${uploadType}`);
+      }
+
+      // Then validate mime type
+      if (!UPLOAD_CONFIGS[uploadType].allowedTypes?.includes(mimetype)) {
+        throw new Error(
+          `Unsupported file type: ${mimetype} for upload type: ${uploadType}`
+        );
       }
 
       // Get file extension
-      const fileExtension = UPLOAD_CONFIGS[uploadType].fileExtensions[mimetype];
+      const fileExtension =
+        UPLOAD_CONFIGS[uploadType].fileExtensions?.[mimetype];
       if (!fileExtension) {
         throw new Error(`Unknown file extension for mime type: ${mimetype}`);
       }
@@ -105,7 +127,7 @@ const uploadToCloudinary = async (
           chunk_size: 6000000,
           use_filename: true,
           unique_filename: true,
-          format: fileExtension, // Specify the file format
+          format: fileExtension,
         };
 
         cloudinary.uploader
@@ -113,7 +135,6 @@ const uploadToCloudinary = async (
             if (error) {
               reject(error);
             } else {
-              // Don't modify the public_id, keep it as Cloudinary returns it
               result.fileType = {
                 extension: fileExtension,
                 mimeType: mimetype,

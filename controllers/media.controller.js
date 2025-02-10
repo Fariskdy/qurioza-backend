@@ -3,6 +3,7 @@ const {
   uploadToCloudinary,
   deleteFromCloudinary,
 } = require("../config/cloudinary");
+const Module = require("../models/module.model");
 
 // Initialize upload - Simplified
 const initializeUpload = async (req, res) => {
@@ -57,7 +58,6 @@ const processUpload = async (req, res) => {
     media.status = "processing";
     media.originalName = req.file.originalname;
     media.mimeType = req.file.mimetype;
-    media.size = req.file.size;
     await media.save();
 
     // Upload to Cloudinary with specified uploadType
@@ -75,10 +75,14 @@ const processUpload = async (req, res) => {
       throw uploadError;
     }
 
+    console.log("Result: ", result);
+
     // Update media record with results
     media.url = result.url;
-    media.publicId = result.publicId;
+    media.publicId = result.public_id;
     media.thumbnail = result.thumbnail;
+    media.size = result.bytes;
+    media.duration = result.duration;
     media.status = "completed";
     await media.save();
 
@@ -153,9 +157,44 @@ const getUnassociatedMedia = async (req, res) => {
   }
 };
 
+// Update the handleMediaUpload function to remove description
+const handleMediaUpload = async (req, res) => {
+  try {
+    const { moduleId, contentId } = req.params;
+    const file = req.file;
+
+    const module = await Module.findById(moduleId);
+    const content = module.content.id(contentId);
+
+    if (!content) {
+      return res.status(404).json({ message: "Content not found" });
+    }
+
+    const result = await uploadToCloudinary(file.path, content.type);
+
+    content.url = result.secure_url;
+    content.publicId = result.public_id;
+    content.size = result.bytes;
+    content.mimeType = file.mimetype;
+
+    if (content.type === "video") {
+      content.duration = result.duration;
+    }
+
+    await module.save();
+    res.json(module);
+  } catch (error) {
+    res.status(500).json({
+      message: "Error uploading media",
+      error: error.message,
+    });
+  }
+};
+
 module.exports = {
   initializeUpload,
   processUpload,
   associateMedia,
   getUnassociatedMedia,
+  handleMediaUpload,
 };

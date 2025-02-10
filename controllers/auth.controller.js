@@ -126,6 +126,9 @@ const refreshToken = async (req, res) => {
   try {
     const decoded = verifyRefreshToken(refreshToken);
     if (!decoded) {
+      // Clear both cookies if refresh token is invalid
+      res.clearCookie("accessToken");
+      res.clearCookie("refreshToken");
       return res
         .status(403)
         .json({ message: "Invalid or expired refresh token" });
@@ -133,6 +136,8 @@ const refreshToken = async (req, res) => {
 
     const user = await User.findById(decoded.userId);
     if (!user) {
+      res.clearCookie("accessToken");
+      res.clearCookie("refreshToken");
       return res.status(404).json({ message: "User not found" });
     }
 
@@ -144,9 +149,19 @@ const refreshToken = async (req, res) => {
     res.cookie("accessToken", accessToken, cookieOptions);
     res.cookie("refreshToken", newRefreshToken, refreshCookieOptions);
 
-    res.json({ message: "Tokens refreshed successfully" });
+    res.json({
+      message: "Tokens refreshed successfully",
+      user: {
+        id: user._id,
+        username: user.username,
+        email: user.email,
+        role: user.role,
+      },
+    });
   } catch (error) {
     console.error("Token refresh error:", error);
+    res.clearCookie("accessToken");
+    res.clearCookie("refreshToken");
     res.status(403).json({ message: "Invalid or expired refresh token" });
   }
 };

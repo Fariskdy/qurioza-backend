@@ -88,20 +88,28 @@ const createCoordinator = async (req, res) => {
 // only update the user details not profile details
 
 const updateCoordinator = async (req, res) => {
-  const { id } = req.params;
-  const { username, email, password } = req.body;
-
   try {
+    const { id } = req.params;
+    const { username, email } = req.body; // Only accept username and email
+
+    // Update only user details
     const user = await User.findByIdAndUpdate(
       id,
-      { username, email, password },
+      { username, email },
       { new: true }
-    ).select("-password"); // Exclude password from the response
-    res.json(user);
+    );
+
+    if (!user) {
+      return res.status(404).json({ message: "Coordinator not found" });
+    }
+
+    res.status(200).json({
+      _id: user._id,
+      username: user.username,
+      email: user.email,
+    });
   } catch (error) {
-    res
-      .status(500)
-      .json({ message: "Error updating coordinator", error: error.message });
+    res.status(500).json({ message: error.message });
   }
 };
 

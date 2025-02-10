@@ -3,6 +3,7 @@ const router = express.Router({ mergeParams: true }); // To access courseId from
 const {
   authenticateToken,
   checkRole,
+  checkRoles,
 } = require("../middleware/auth.middleware");
 const { moduleUpload } = require("../middleware/upload.middleware");
 const {
@@ -18,23 +19,41 @@ const {
   updateModuleContent,
   deleteModuleContent,
   reorderModuleContent,
+  getSecureContentUrl,
+  getPublicModules,
+  getEnrolledModules,
 } = require("../controllers/module.controller");
 
-// All routes require authentication
+// Public routes (website visitors)
+// Only basic info - no content URLs or secure data
+router.get("/public", getPublicModules);
+
+// Authentication required for all routes below
 router.use(authenticateToken);
 
-// Public routes (for enrolled students)
-router.get("/", getModules);
-router.get("/:moduleId", getModule);
+// Secure content view route - accessible by both coordinator and student
+router.get(
+  "/:moduleId/content/:contentId/secure-view",
+  checkRoles(["course coordinator", "student"]),
+  getSecureContentUrl
+);
 
-// Coordinator only routes
+// Enrolled student routes
+// Can access content but through secure URLs
+router.get("/enrolled", checkRole("student"), getEnrolledModules);
+
+// Course coordinator routes
+// Full access to all module data and management
 router.use(checkRole("course coordinator"));
+
+router.get("/", getModules); // Full module data
+router.get("/:moduleId", getModule);
 router.post("/", createModule);
 router.put("/:moduleId", updateModule);
 router.delete("/:moduleId", deleteModule);
 router.put("/:moduleId/reorder", reorderModule);
 
-// New content routes
+// Module content management routes
 router.get("/:moduleId/content", getModuleContent);
 router.get("/:moduleId/content/:contentId", getModuleContentItem);
 router.post("/:moduleId/content", moduleUpload.any(), addModuleContent);
