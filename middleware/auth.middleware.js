@@ -13,10 +13,12 @@ const authenticateToken = (req, res, next) => {
   }
 
   if (!token) {
+    res.header('Access-Control-Allow-Credentials', 'true');
     return res.status(401).json({ message: "Authentication required" });
   }
 
   if (isTokenBlacklisted(token)) {
+    res.header('Access-Control-Allow-Credentials', 'true');
     return res.status(401).json({ message: "Token has been invalidated" });
   }
 
@@ -25,6 +27,7 @@ const authenticateToken = (req, res, next) => {
     req.user = decoded;
     next();
   } catch (err) {
+    res.header('Access-Control-Allow-Credentials', 'true');
     return res.status(403).json({ message: "Invalid or expired token" });
   }
 };
