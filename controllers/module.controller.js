@@ -738,7 +738,7 @@ const getEnrolledModules = async (req, res) => {
       batch: {
         $in: await Batch.find({
           course: req.params.courseId,
-          status: { $in: ["enrolling","ongoing", "completed"] },
+          status: { $in: ["enrolling", "ongoing", "completed"] },
         }).select("_id"),
       },
     }).populate("batch");
