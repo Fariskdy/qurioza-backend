@@ -731,7 +731,6 @@ const getPublicModules = async (req, res) => {
 // Enrolled student access - secure URLs
 const getEnrolledModules = async (req, res) => {
   try {
-    // First verify enrollment through Batch and Enrollment models
     const activeEnrollment = await Enrollment.findOne({
       student: req.user.userId,
       status: "active",
@@ -750,7 +749,6 @@ const getEnrolledModules = async (req, res) => {
       });
     }
 
-    // Get modules based on batch status and dates
     const modules = await Module.find({
       course: req.params.courseId,
       status: "published",
@@ -758,47 +756,21 @@ const getEnrolledModules = async (req, res) => {
       .sort({ order: 1 })
       .lean();
 
-    // Transform content to include secure URLs and respect batch-specific settings
     const enrolledModules = modules.map((module) => ({
       ...module,
-      content: module.content
-        .filter((item) => {
-          // Check batch-specific settings
-          if (item.batchSpecificSettings?.isEnabled === false) {
-            return false;
-          }
-
-          // Check if content is available based on batch dates
-          if (item.batchSpecificSettings?.visibleFromDate) {
-            return (
-              new Date(item.batchSpecificSettings.visibleFromDate) <= new Date()
-            );
-          }
-
-          return true;
-        })
-        .map((item) => ({
-          _id: item._id,
-          title: item.title,
-          type: item.type,
-          duration: item.duration,
-          isPreview: item.isPreview,
-          order: item.order,
-          thumbnail: item.thumbnail,
-          completedInBatch: activeEnrollment.completedModules.includes(
-            module._id
-          ),
-          // Instead of direct URL, provide endpoint for secure access
-          secureUrlEndpoint: `/api/courses/${req.params.courseId}/modules/${module._id}/content/${item._id}/secure-view`,
-        })),
+      isCompleted: activeEnrollment.completedModules.includes(module._id),
+      content: module.content.map((item) => ({
+        ...item,
+        isCompleted: activeEnrollment.isContentCompleted(module._id, item._id),
+      })),
     }));
 
-    // Add progress information
     const response = {
       modules: enrolledModules,
       progress: {
         overall: activeEnrollment.progress,
         completedModules: activeEnrollment.completedModules,
+        completedContent: activeEnrollment.completedContent,
         batchStatus: activeEnrollment.batch.status,
         batchEndDate: activeEnrollment.batch.batchEndDate,
       },
@@ -809,6 +781,138 @@ const getEnrolledModules = async (req, res) => {
     console.error("Error in getEnrolledModules:", error);
     res.status(500).json({
       message: "Error fetching enrolled modules",
+      error: error.message,
+    });
+  }
+};
+
+// Add this function to module.controller.js
+const markContentComplete = async (req, res) => {
+  try {
+    const { courseId, moduleId, contentId } = req.params;
+
+    // Find any active enrollment for this student in this course
+    const enrollment = await Enrollment.findOne({
+      student: req.user.userId,
+      batch: {
+        $in: await Batch.find({
+          course: courseId,
+        }).select("_id"),
+      },
+      status: "active",
+    });
+
+    if (!enrollment) {
+      return res.status(403).json({ message: "No active enrollment found" });
+    }
+
+    // Add content to completedContent if not already present
+    if (!enrollment.isContentCompleted(moduleId, contentId)) {
+      enrollment.completedContent.push({
+        moduleId,
+        contentId,
+        completedAt: new Date(),
+      });
+    }
+
+    // Get the module to check if all content is completed
+    const module = await Module.findById(moduleId);
+    if (!module) {
+      return res.status(404).json({ message: "Module not found" });
+    }
+
+    // Check if all content in the module is completed
+    const moduleContentIds = module.content.map((content) =>
+      content._id.toString()
+    );
+    const completedContentIds = enrollment.completedContent
+      .filter((item) => item.moduleId.toString() === moduleId)
+      .map((item) => item.contentId.toString());
+
+    const allContentCompleted = moduleContentIds.every((id) =>
+      completedContentIds.includes(id)
+    );
+
+    // Add moduleId to completedModules if all content is completed
+    if (
+      allContentCompleted &&
+      !enrollment.completedModules.includes(moduleId)
+    ) {
+      enrollment.completedModules.push(moduleId);
+    }
+
+    // Calculate new progress percentage
+    const totalModules = await Module.countDocuments({ course: courseId });
+    enrollment.progress = Math.round(
+      (enrollment.completedModules.length / totalModules) * 100
+    );
+
+    await enrollment.save();
+
+    res.json({
+      success: true,
+      progress: enrollment.progress,
+      completedModules: enrollment.completedModules,
+      completedContent: enrollment.completedContent,
+    });
+  } catch (error) {
+    res.status(500).json({
+      message: "Error marking content as complete",
+      error: error.message,
+    });
+  }
+};
+
+// Add this new controller function
+const markContentUncomplete = async (req, res) => {
+  try {
+    const enrollment = await Enrollment.findOne({
+      student: req.user.userId,
+      batch: {
+        $in: await Batch.find({
+          course: req.params.courseId,
+        }).select("_id"),
+      },
+      status: "active",
+    });
+
+    if (!enrollment) {
+      return res.status(403).json({ message: "No active enrollment found" });
+    }
+
+    // Remove the content from completedContent
+    enrollment.completedContent = enrollment.completedContent.filter(
+      (item) =>
+        !(
+          item.moduleId.toString() === req.params.moduleId &&
+          item.contentId.toString() === req.params.contentId
+        )
+    );
+
+    // Remove from completedModules if needed
+    enrollment.completedModules = enrollment.completedModules.filter(
+      (moduleId) => moduleId.toString() !== req.params.moduleId
+    );
+
+    // Recalculate progress
+    const totalModules = await Module.countDocuments({
+      course: req.params.courseId,
+    });
+    enrollment.progress = Math.round(
+      (enrollment.completedModules.length / totalModules) * 100
+    );
+
+    await enrollment.save();
+
+    res.json({
+      success: true,
+      progress: enrollment.progress,
+      completedModules: enrollment.completedModules,
+      completedContent: enrollment.completedContent,
+    });
+  } catch (error) {
+    res.status(500).json({
+      message: "Error marking content as uncomplete",
       error: error.message,
     });
   }
@@ -830,4 +934,6 @@ module.exports = {
   getSecureContentUrl,
   getPublicModules,
   getEnrolledModules,
+  markContentComplete,
+  markContentUncomplete,
 };

@@ -22,6 +22,8 @@ const {
   getSecureContentUrl,
   getPublicModules,
   getEnrolledModules,
+  markContentComplete,
+  markContentUncomplete,
 } = require("../controllers/module.controller");
 
 // Public routes (website visitors)
@@ -41,6 +43,20 @@ router.get(
 // Enrolled student routes
 // Can access content but through secure URLs
 router.get("/enrolled", checkRole("student"), getEnrolledModules);
+
+// Move this route BEFORE the coordinator routes
+router.post(
+  "/:moduleId/content/:contentId/complete",
+  checkRole("student"),
+  markContentComplete
+);
+
+// Add the uncomplete route
+router.post(
+  "/:moduleId/content/:contentId/uncomplete",
+  checkRole("student"),
+  markContentUncomplete
+);
 
 // Course coordinator routes
 // Full access to all module data and management

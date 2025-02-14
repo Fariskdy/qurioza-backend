@@ -30,6 +30,30 @@ const EnrollmentSchema = new mongoose.Schema({
       ref: "Module",
     },
   ],
+  completedContent: [
+    {
+      moduleId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Module",
+      },
+      contentId: {
+        type: mongoose.Schema.Types.ObjectId,
+      },
+      completedAt: {
+        type: Date,
+        default: Date.now,
+      },
+    },
+  ],
 });
+
+// Add helper method to check content completion
+EnrollmentSchema.methods.isContentCompleted = function (moduleId, contentId) {
+  return this.completedContent.some(
+    (item) =>
+      item.moduleId.toString() === moduleId.toString() &&
+      item.contentId.toString() === contentId.toString()
+  );
+};
 
 module.exports = mongoose.model("Enrollment", EnrollmentSchema);
