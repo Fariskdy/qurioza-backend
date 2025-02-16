@@ -47,18 +47,25 @@ app.use("/api/courses", require("./routes/course.route.js"));
 app.use("/api/courses/:courseId/modules", require("./routes/module.route.js"));
 app.use("/api/courses/:courseId/batches", require("./routes/batch.route.js"));
 
+// Student assignment routes (add this before batch hierarchy)
+app.use(
+  "/api/student/assignments",
+  require("./routes/student.assignment.route.js")
+);
+
 // Batch hierarchy
 app.use(
   "/api/batches/:batchId/assignments",
   require("./routes/assignment.route.js")
 );
-app.use("/api/batches/:batchId/quizzes", require("./routes/quiz.route.js"));
+
 app.use(
   "/api/batches/:batchId/submissions",
   require("./routes/submission.route.js")
 );
 
 // Enrollment and submission routes
+app.use("/api/quizzes", require("./routes/quiz.route.js"));
 app.use("/api/enrollments", require("./routes/enrollment.route.js"));
 app.use("/api/submissions", require("./routes/submission.route.js"));
 

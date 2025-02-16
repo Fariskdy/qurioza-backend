@@ -918,6 +918,80 @@ const markContentUncomplete = async (req, res) => {
   }
 };
 
+// Add this controller function
+const getTeacherModules = async (req, res) => {
+  try {
+    // First check if teacher is assigned to any batch of this course
+    const teacherBatch = await Batch.findOne({
+      course: req.params.courseId,
+      teachers: req.user.userId,
+      status: { $in: ["enrolling", "ongoing"] }, // Only active batches
+    });
+
+    if (!teacherBatch) {
+      return res.status(403).json({
+        message:
+          "You are not assigned as a teacher to any active batch of this course",
+      });
+    }
+
+    // Get all published modules for the course
+    const modules = await Module.find({
+      course: req.params.courseId,
+      status: "published",
+    })
+      .sort({ order: 1 })
+      .populate("coordinator", "username")
+      .lean();
+
+    // Transform modules to include batch information
+    const modulesWithBatchInfo = modules.map((module) => ({
+      ...module,
+      batchInfo: {
+        batchId: teacherBatch._id,
+        batchName: teacherBatch.name,
+        batchStartDate: teacherBatch.batchStartDate,
+        batchEndDate: teacherBatch.batchEndDate,
+        status: teacherBatch.status,
+      },
+      content: module.content.map((item) => ({
+        ...item,
+        // Include secure URLs for teacher access
+        url: item.url, // Teachers can access content directly
+        publicId: item.publicId,
+        thumbnail: item.thumbnail,
+        duration: item.duration,
+        size: item.size,
+        mimeType: item.mimeType,
+      })),
+    }));
+
+    // Get enrollment statistics for the batch
+    const enrollmentStats = {
+      totalStudents: teacherBatch.enrollmentCount,
+      batchCapacity: teacherBatch.maxStudents,
+    };
+
+    res.json({
+      modules: modulesWithBatchInfo,
+      batchInfo: {
+        _id: teacherBatch._id,
+        name: teacherBatch.name,
+        status: teacherBatch.status,
+        startDate: teacherBatch.batchStartDate,
+        endDate: teacherBatch.batchEndDate,
+        enrollmentStats,
+      },
+    });
+  } catch (error) {
+    console.error("Error in getTeacherModules:", error);
+    res.status(500).json({
+      message: "Error fetching teacher modules",
+      error: error.message,
+    });
+  }
+};
+
 module.exports = {
   getModules,
   getModule,
@@ -936,4 +1010,5 @@ module.exports = {
   getEnrolledModules,
   markContentComplete,
   markContentUncomplete,
+  getTeacherModules,
 };

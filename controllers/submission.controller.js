@@ -2,6 +2,10 @@ const Submission = require("../models/submission.model");
 const Assignment = require("../models/assignment.model");
 const Quiz = require("../models/quiz.model");
 const Batch = require("../models/batch.model");
+const {
+  uploadToCloudinary,
+  deleteFromCloudinary,
+} = require("../config/cloudinary");
 
 // Get all submissions for an assignment/quiz
 const getSubmissions = async (req, res) => {
@@ -76,13 +80,39 @@ const submitAssignment = async (req, res) => {
       return res.status(400).json({ message: "Already submitted" });
     }
 
+    // Handle file uploads
+    const attachments = [];
+    if (req.files && req.files.length > 0) {
+      for (const file of req.files) {
+        try {
+          const result = await uploadToCloudinary(
+            file.buffer,
+            "assignmentSubmission",
+            file.mimetype
+          );
+
+          attachments.push({
+            filename: file.originalname,
+            url: result.secure_url,
+            mimetype: file.mimetype,
+          });
+        } catch (error) {
+          console.error("File upload error:", error);
+          return res.status(500).json({
+            message: "Error uploading file",
+            error: error.message,
+          });
+        }
+      }
+    }
+
     const submission = await Submission.create({
       type: "assignment",
       assignment: assignment._id,
       student: req.user.userId,
       batch: assignment.batch,
-      content: req.body.content,
-      attachments: req.body.attachments,
+      content: req.body.content || "",
+      attachments,
       status: new Date() > assignment.dueDate ? "late" : "submitted",
     });
 
@@ -244,6 +274,120 @@ const getStudentSubmissions = async (req, res) => {
   }
 };
 
+// Edit submission
+const editSubmission = async (req, res) => {
+  try {
+    const submission = await Submission.findOne({
+      assignment: req.params.assignmentId,
+      student: req.user.userId,
+    });
+
+    if (!submission) {
+      return res.status(404).json({ message: "Submission not found" });
+    }
+
+    // Check if submission is already graded
+    if (submission.status === "graded") {
+      return res.status(400).json({ message: "Cannot edit graded submission" });
+    }
+
+    // Check if assignment is past due date
+    const assignment = await Assignment.findById(req.params.assignmentId);
+    if (new Date() > assignment.dueDate) {
+      return res.status(400).json({ message: "Cannot edit past due date" });
+    }
+
+    // Handle file uploads
+    const attachments = [...submission.attachments]; // Keep existing attachments
+    if (req.files && req.files.length > 0) {
+      for (const file of req.files) {
+        const result = await uploadToCloudinary(
+          file.buffer,
+          "assignmentSubmission",
+          file.mimetype
+        );
+        attachments.push({
+          filename: file.originalname,
+          url: result.secure_url,
+          mimetype: file.mimetype,
+        });
+      }
+    }
+
+    submission.content = req.body.content || submission.content;
+    submission.attachments = attachments;
+    submission.updatedAt = new Date();
+
+    await submission.save();
+    res.json(submission);
+  } catch (error) {
+    res.status(500).json({
+      message: "Error updating submission",
+      error: error.message,
+    });
+  }
+};
+
+// Add this new function to handle attachment deletion
+const removeAttachment = async (req, res) => {
+  try {
+    const submission = await Submission.findOne({
+      assignment: req.params.assignmentId,
+      student: req.user.userId,
+    });
+
+    if (!submission) {
+      return res.status(404).json({ message: "Submission not found" });
+    }
+
+    // Check if submission is already graded
+    if (submission.status === "graded") {
+      return res.status(400).json({ message: "Cannot edit graded submission" });
+    }
+
+    // Check if assignment is past due date
+    const assignment = await Assignment.findById(req.params.assignmentId);
+    if (new Date() > assignment.dueDate) {
+      return res.status(400).json({ message: "Cannot edit past due date" });
+    }
+
+    // Find the attachment
+    const attachmentIndex = submission.attachments.findIndex(
+      (att) => att._id.toString() === req.params.attachmentId
+    );
+
+    if (attachmentIndex === -1) {
+      return res.status(404).json({ message: "Attachment not found" });
+    }
+
+    const attachment = submission.attachments[attachmentIndex];
+
+    // Delete from Cloudinary
+    // Keep the full path including extension for raw files
+    // URL format: https://res.cloudinary.com/[cloud_name]/raw/upload/v[version]/assignments/submissions/[filename].[ext]
+    const urlParts = attachment.url.split("/");
+    const publicId = `assignments/submissions/${urlParts[urlParts.length - 1]}`; // Include filename with extension
+
+    try {
+      await deleteFromCloudinary(publicId, "raw");
+    } catch (error) {
+      console.error("Error deleting from Cloudinary:", error);
+      // Continue with database removal even if Cloudinary deletion fails
+    }
+
+    // Remove from submission
+    submission.attachments.splice(attachmentIndex, 1);
+    await submission.save();
+
+    res.json(submission);
+  } catch (error) {
+    res.status(500).json({
+      message: "Error removing attachment",
+      error: error.message,
+    });
+  }
+};
+
 module.exports = {
   getSubmissions,
   getSubmission,
@@ -252,4 +396,6 @@ module.exports = {
   gradeSubmission,
   getBatchSubmissions,
   getStudentSubmissions,
+  editSubmission,
+  removeAttachment,
 };

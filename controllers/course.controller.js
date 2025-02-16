@@ -9,6 +9,7 @@ const Media = require("../models/media.model");
 const Category = require("../models/category.model");
 const mongoose = require("mongoose");
 const Enrollment = require("../models/enrollment.model");
+const Batch = require("../models/batch.model");
 
 // Get all courses (with filters and pagination)
 const getCourses = async (req, res) => {
@@ -776,6 +777,51 @@ const getStudentCourses = async (req, res) => {
   }
 };
 
+// Add this with the other controller functions
+const getTeacherCourses = async (req, res) => {
+  try {
+    const { status } = req.query;
+
+    // Find all batches where the teacher is assigned
+    const batches = await Batch.find({
+      teachers: req.user.userId,
+      ...(status && { status: status }), // Filter by status if provided
+    })
+      .populate({
+        path: "course",
+        select:
+          "title description image level price stats slug features duration totalHours",
+        populate: {
+          path: "category",
+          select: "name slug",
+        },
+      })
+      .sort({ batchStartDate: -1 });
+
+    // Transform the data to return course info with batch details
+    const courses = batches.map((batch) => ({
+      course: batch.course,
+      batch: {
+        id: batch._id,
+        name: batch.name,
+        status: batch.status,
+        startDate: batch.batchStartDate,
+        endDate: batch.batchEndDate,
+        enrollmentCount: batch.enrollmentCount,
+        maxStudents: batch.maxStudents,
+      },
+    }));
+
+    res.json({ courses });
+  } catch (error) {
+    console.error("Error in getTeacherCourses:", error);
+    res.status(500).json({
+      message: "Error fetching teacher courses",
+      error: error.message,
+    });
+  }
+};
+
 module.exports = {
   getCourses,
   getCourse,
@@ -790,4 +836,5 @@ module.exports = {
   updateCourseImage,
   updateCourseVideo,
   getStudentCourses,
+  getTeacherCourses,
 };

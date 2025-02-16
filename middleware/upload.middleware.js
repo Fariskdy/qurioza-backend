@@ -21,6 +21,21 @@ const FILE_CONFIGS = {
       "application/vnd.openxmlformats-officedocument.presentationml.presentation",
     ],
   },
+  assignment: {
+    maxSize: 25 * 1024 * 1024, // 25MB
+    mimeTypes: [
+      "application/pdf",
+      "application/msword",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "text/plain",
+      "application/zip",
+      "application/x-zip-compressed",
+      "application/x-rar-compressed",
+      "image/jpeg",
+      "image/png",
+      "image/webp",
+    ],
+  },
 };
 
 // Create multer instance with configuration
@@ -92,8 +107,12 @@ const handleUploadError = (err, req, res, next) => {
 // Create module-specific upload middleware
 const moduleUpload = createUploadMiddleware(["video", "document"]);
 
+// Create assignment-specific upload middleware
+const assignmentUpload = createUploadMiddleware(["document", "image"]);
+
 module.exports = {
   createUploadMiddleware,
   handleUploadError,
   moduleUpload,
+  assignmentUpload,
 };

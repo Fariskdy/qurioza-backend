@@ -90,6 +90,35 @@ const UPLOAD_CONFIGS = {
       "application/x-zip-compressed": "zip",
     },
   },
+  assignmentSubmission: {
+    folder: "assignments/submissions",
+    resourceType: "raw",
+    allowedTypes: [
+      "application/pdf",
+      "application/msword",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "text/plain",
+      "application/zip",
+      "application/x-zip-compressed",
+      "application/x-rar-compressed",
+      "image/jpeg",
+      "image/png",
+      "image/webp",
+    ],
+    fileExtensions: {
+      "application/pdf": "pdf",
+      "application/msword": "doc",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+        "docx",
+      "text/plain": "txt",
+      "application/zip": "zip",
+      "application/x-zip-compressed": "zip",
+      "application/x-rar-compressed": "rar",
+      "image/jpeg": "jpg",
+      "image/png": "png",
+      "image/webp": "webp",
+    },
+  },
 };
 
 const uploadToCloudinary = async (
@@ -162,7 +191,7 @@ const uploadToCloudinary = async (
   return uploadWithRetry();
 };
 
-const deleteFromCloudinary = async (publicId, resourceType = "image") => {
+const deleteFromCloudinary = async (publicId, resourceType = "raw") => {
   try {
     console.log(`Attempting to delete: ${publicId} (${resourceType})`);
 

@@ -18,6 +18,7 @@ const {
   updateCourseImage,
   updateCourseVideo,
   getStudentCourses,
+  getTeacherCourses,
 } = require("../controllers/course.controller");
 
 const router = express.Router();
@@ -36,7 +37,19 @@ router.get("/:slug", getCourse);
 router.use("/:courseId/batches", require("./batch.route.js"));
 router.use("/:courseId/modules", require("./module.route.js"));
 
-router.get("/student/my-courses", authenticateToken, checkRole("student"), getStudentCourses);
+router.get(
+  "/student/my-courses",
+  authenticateToken,
+  checkRole("student"),
+  getStudentCourses
+);
+
+router.get(
+  "/teacher/my-courses",
+  authenticateToken,
+  checkRole("teacher"),
+  getTeacherCourses
+);
 
 // Coordinator only routes
 router.use(authenticateToken, checkRole("course coordinator"));
@@ -72,8 +85,5 @@ router.put("/:id/video", updateCourseVideo);
 
 router.delete("/:id", deleteCourse);
 router.patch("/:id/publish", publishCourse);
-
-
-
 
 module.exports = router;

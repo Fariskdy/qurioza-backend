@@ -3,6 +3,7 @@ const router = express.Router({ mergeParams: true }); // To access batchId from 
 const {
   authenticateToken,
   checkRole,
+  checkRoles,
 } = require("../middleware/auth.middleware");
 const {
   getAssignments,
@@ -11,20 +12,38 @@ const {
   updateAssignment,
   deleteAssignment,
   getSubmissions,
+  getBatchStats,
+  getEnrolledBatcheswithAssignments,
+  getStudentAssignments,
 } = require("../controllers/assignment.controller");
 
 // All routes require authentication
 router.use(authenticateToken);
 
 // Student routes
-router.get("/", getAssignments);
-router.get("/:assignmentId", getAssignment);
+router.get(
+  "/enrolled-batches",
+  checkRole("student"),
+  getEnrolledBatcheswithAssignments
+);
+router.get(
+  "/student-assignments/:batchId",
+  checkRole("student"),
+  getStudentAssignments
+);
 
 // Teacher only routes
-router.use(checkRole("teacher"));
-router.post("/", createAssignment);
-router.put("/:assignmentId", updateAssignment);
-router.delete("/:assignmentId", deleteAssignment);
-router.get("/:assignmentId/submissions", getSubmissions);
+router.post("/", checkRole("teacher"), createAssignment);
+router.get("/all", checkRoles(["teacher"]), getAssignments);
+
+// The more specific route should come BEFORE the generic route
+router.get("/stats", getBatchStats);
+
+// Generic route for getting assignment by ID
+router.get("/:assignmentId", checkRoles(["teacher", "student"]), getAssignment);
+
+router.put("/:assignmentId", checkRole("teacher"), updateAssignment);
+router.delete("/:assignmentId", checkRole("teacher"), deleteAssignment);
+router.get("/:assignmentId/submissions", checkRole("teacher"), getSubmissions);
 
 module.exports = router;

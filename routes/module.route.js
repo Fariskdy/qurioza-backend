@@ -22,6 +22,7 @@ const {
   getSecureContentUrl,
   getPublicModules,
   getEnrolledModules,
+  getTeacherModules,
   markContentComplete,
   markContentUncomplete,
 } = require("../controllers/module.controller");
@@ -36,10 +37,12 @@ router.use(authenticateToken);
 // Secure content view route - accessible by both coordinator and student
 router.get(
   "/:moduleId/content/:contentId/secure-view",
-  checkRoles(["course coordinator", "student"]),
+  checkRoles(["course coordinator", "student", "teacher"]),
   getSecureContentUrl
 );
 
+// Teacher routes
+router.get("/teacher", checkRole("teacher"), getTeacherModules);
 // Enrolled student routes
 // Can access content but through secure URLs
 router.get("/enrolled", checkRole("student"), getEnrolledModules);

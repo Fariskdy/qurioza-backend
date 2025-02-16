@@ -6,11 +6,6 @@ const QuizSchema = new mongoose.Schema({
     ref: "Batch",
     required: true,
   },
-  module: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: "Module",
-    required: true,
-  },
   title: {
     type: String,
     required: true,
