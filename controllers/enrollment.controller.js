@@ -2,6 +2,7 @@ const Enrollment = require("../models/enrollment.model");
 const Batch = require("../models/batch.model");
 const Course = require("../models/course.model");
 const Module = require("../models/module.model");
+const { createPaymentSession } = require("../controllers/payment.controller");
 
 // Get user's enrollments
 const getEnrollments = async (req, res) => {
@@ -11,12 +12,20 @@ const getEnrollments = async (req, res) => {
         path: "batch",
         populate: {
           path: "course",
-          select: "title slug image",
+          select: "title slug image price",
         },
       })
       .sort({ enrollmentDate: -1 });
 
-    res.json(enrollments);
+    // Add payment status to each enrollment
+    const enrichedEnrollments = enrollments.map((enrollment) => ({
+      ...enrollment.toObject(),
+      isPaid: enrollment.isPaid(),
+      requiresPayment: enrollment.requiresPayment(),
+      paymentStatus: enrollment.paymentStatus,
+    }));
+
+    res.json(enrichedEnrollments);
   } catch (error) {
     res.status(500).json({
       message: "Error fetching enrollments",
@@ -35,7 +44,7 @@ const getEnrollment = async (req, res) => {
       path: "batch",
       populate: {
         path: "course",
-        select: "title slug image",
+        select: "title slug image price",
       },
     });
 
@@ -43,7 +52,15 @@ const getEnrollment = async (req, res) => {
       return res.status(404).json({ message: "Enrollment not found" });
     }
 
-    res.json(enrollment);
+    // Add payment status
+    const enrichedEnrollment = {
+      ...enrollment.toObject(),
+      isPaid: enrollment.isPaid(),
+      requiresPayment: enrollment.requiresPayment(),
+      paymentStatus: enrollment.paymentStatus,
+    };
+
+    res.json(enrichedEnrollment);
   } catch (error) {
     res.status(500).json({
       message: "Error fetching enrollment",
@@ -55,7 +72,7 @@ const getEnrollment = async (req, res) => {
 // Enroll in a batch
 const enrollInBatch = async (req, res) => {
   try {
-    // Add role check
+    // Role check
     if (req.user.role !== "student") {
       return res.status(403).json({
         message: "Only students can enroll in courses",
@@ -106,26 +123,19 @@ const enrollInBatch = async (req, res) => {
       });
     }
 
-    // Create enrollment
-    const enrollment = await Enrollment.create({
-      student: req.user.userId,
-      batch: batch._id,
-    });
+    // Create payment session
+    const result = await createPaymentSession(
+      req.params.batchId,
+      req.user.userId
+    );
 
-    // Update course stats
-    await Course.findByIdAndUpdate(batch.course, {
-      $inc: { "stats.enrolledStudents": 1 },
+    res.status(200).json({
+      ...result,
+      message: "Proceed to payment",
     });
-
-    // Update batch stats
-    await Batch.findByIdAndUpdate(batch._id, {
-      $inc: { enrollmentCount: 1 },
-    });
-
-    res.status(201).json(enrollment);
   } catch (error) {
     res.status(500).json({
-      message: "Error creating enrollment",
+      message: "Error initiating enrollment",
       error: error.message,
     });
   }
@@ -218,10 +228,18 @@ const getBatchEnrollments = async (req, res) => {
     }
 
     const enrollments = await Enrollment.find({ batch: batch._id })
-      .populate("student", "username")
+      .populate("student", "username email")
       .sort({ enrollmentDate: -1 });
 
-    res.json(enrollments);
+    // Add payment status to each enrollment
+    const enrichedEnrollments = enrollments.map((enrollment) => ({
+      ...enrollment.toObject(),
+      isPaid: enrollment.isPaid(),
+      requiresPayment: enrollment.requiresPayment(),
+      paymentStatus: enrollment.paymentStatus,
+    }));
+
+    res.json(enrichedEnrollments);
   } catch (error) {
     res.status(500).json({
       message: "Error fetching batch enrollments",

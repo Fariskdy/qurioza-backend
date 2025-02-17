@@ -10,11 +10,21 @@ require("./schedulers/batchStatusUpdater");
 require("./schedulers/mediaCleanup");
 
 // Middleware
+app.post(
+  "/api/payments/webhook",
+  express.raw({ type: "application/json" }),
+  require("./controllers/payment.controller").handleWebhook
+);
+
+// Regular middleware for other routes
 app.use(express.json());
 app.use(cookieParser());
 app.use(
   cors({
-    origin: process.env.CLIENT_URL || "https://qurioza-client.onrender.com",
+    origin:
+      process.env.NODE_ENV === "production"
+        ? process.env.CLIENT_URL
+        : "http://localhost:5173", // Vite's default port
     credentials: true,
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
@@ -68,6 +78,10 @@ app.use(
 app.use("/api/quizzes", require("./routes/quiz.route.js"));
 app.use("/api/enrollments", require("./routes/enrollment.route.js"));
 app.use("/api/submissions", require("./routes/submission.route.js"));
+
+// Import and use payment routes
+const paymentRoutes = require("./routes/payment.route");
+app.use("/api/payments", paymentRoutes);
 
 // Error handling middleware
 app.use((err, req, res, next) => {

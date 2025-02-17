@@ -187,6 +187,9 @@ const BatchSchema = new mongoose.Schema(
 BatchSchema.index({ status: 1, enrollmentEndDate: 1 });
 BatchSchema.index({ course: 1, batchStartDate: 1 });
 
+// Add index for course lookup
+BatchSchema.index({ course: 1 });
+
 // Modified validation hook
 BatchSchema.pre("save", function (next) {
   const currentDate = new Date();

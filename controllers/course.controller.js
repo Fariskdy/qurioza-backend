@@ -747,18 +747,27 @@ const getStudentCourses = async (req, res) => {
     const total = await Enrollment.countDocuments(enrollmentQuery);
 
     // Transform the data to return course info with enrollment/batch details
-    const courses = enrollments.map((enrollment) => ({
-      course: enrollment.batch.course,
-      enrollmentStatus: enrollment.status,
-      progress: enrollment.progress,
-      batch: {
-        name: enrollment.batch.name,
-        status: enrollment.batch.status,
-        startDate: enrollment.batch.batchStartDate,
-        endDate: enrollment.batch.batchEndDate,
-      },
-      enrollmentDate: enrollment.enrollmentDate,
-    }));
+    // Add null checks to prevent errors
+    const courses = enrollments
+      .filter((enrollment) => enrollment.batch && enrollment.batch.course) // Filter out invalid entries
+      .map((enrollment) => ({
+        course: enrollment.batch.course,
+        enrollmentStatus: enrollment.status,
+        progress: enrollment.progress,
+        payment: {
+          status: enrollment.payment.status,
+          paidAt: enrollment.payment.paidAt,
+        },
+        batch: {
+          id: enrollment.batch._id,
+          name: enrollment.batch.name,
+          status: enrollment.batch.status,
+          startDate: enrollment.batch.batchStartDate,
+          endDate: enrollment.batch.batchEndDate,
+        },
+        enrollmentDate: enrollment.enrollmentDate,
+        enrollmentId: enrollment._id,
+      }));
 
     res.json({
       courses,
