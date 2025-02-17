@@ -119,6 +119,16 @@ const UPLOAD_CONFIGS = {
       "image/webp": "webp",
     },
   },
+  avatar: {
+    folder: "users/avatars",
+    resourceType: "image",
+    allowedTypes: ["image/jpeg", "image/png", "image/webp"],
+    fileExtensions: {
+      "image/jpeg": "jpg",
+      "image/png": "png",
+      "image/webp": "webp",
+    },
+  },
 };
 
 const uploadToCloudinary = async (
