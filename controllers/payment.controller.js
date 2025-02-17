@@ -36,7 +36,7 @@ const createPaymentSession = async (batchId, userId) => {
       ],
       mode: "payment",
       success_url: `${process.env.CLIENT_URL}/payment/success?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${process.env.CLIENT_URL}/payment/cancel`,
+      cancel_url: `${process.env.CLIENT_URL}/payment/cancel?course=${batch.course.slug}`,
       metadata: {
         batchId: batch._id.toString(),
         userId: userId,
@@ -86,52 +86,61 @@ const handleWebhook = async (req, res) => {
 
     console.log("Webhook event type:", event.type);
 
-    if (event.type === "checkout.session.completed") {
-      const session = event.data.object;
-      console.log("Payment session data:", {
-        metadata: session.metadata,
-        amount: session.amount_total,
-        currency: session.currency,
-      });
-
-      try {
-        // Create enrollment after successful payment
-        const enrollment = await Enrollment.create({
-          student: session.metadata.userId,
-          batch: session.metadata.batchId,
-          status: "active",
-          payment: {
-            status: "completed",
-            stripePaymentId: session.payment_intent,
-            stripeSessionId: session.id,
-            amount: session.amount_total / 100, // Convert from cents
-            currency: session.currency.toUpperCase(),
-            paidAt: new Date(),
-          },
+    switch (event.type) {
+      case "checkout.session.completed":
+        const session = event.data.object;
+        console.log("Payment session data:", {
+          metadata: session.metadata,
+          amount: session.amount_total,
+          currency: session.currency,
         });
 
-        console.log("Created enrollment:", enrollment._id);
+        try {
+          // Create enrollment after successful payment
+          const enrollment = await Enrollment.create({
+            student: session.metadata.userId,
+            batch: session.metadata.batchId,
+            status: "active",
+            payment: {
+              status: "completed",
+              stripePaymentId: session.payment_intent,
+              stripeSessionId: session.id,
+              amount: session.amount_total / 100,
+              currency: session.currency.toUpperCase(),
+              paidAt: new Date(),
+            },
+          });
 
-        // Update course and batch stats
-        await Promise.all([
-          Course.findByIdAndUpdate(
-            session.metadata.courseId,
-            { $inc: { "stats.enrolledStudents": 1 } },
-            { new: true }
-          ),
-          Batch.findByIdAndUpdate(
-            session.metadata.batchId,
-            { $inc: { enrollmentCount: 1 } },
-            { new: true }
-          ),
-        ]);
+          console.log("Created enrollment:", enrollment._id);
 
-        console.log("Updated course and batch stats");
-      } catch (error) {
-        console.error("Error processing webhook:", error);
-        // Don't throw here - we want to return 200 to Stripe
-        // but log the error for debugging
-      }
+          // Update course and batch stats
+          await Promise.all([
+            Course.findByIdAndUpdate(
+              session.metadata.courseId,
+              { $inc: { "stats.enrolledStudents": 1 } },
+              { new: true }
+            ),
+            Batch.findByIdAndUpdate(
+              session.metadata.batchId,
+              { $inc: { enrollmentCount: 1 } },
+              { new: true }
+            ),
+          ]);
+
+          console.log("Updated course and batch stats");
+        } catch (error) {
+          console.error("Error processing webhook:", error);
+        }
+        break;
+
+      case "payment_intent.payment_failed":
+        const paymentIntent = event.data.object;
+        console.log("Payment failed:", paymentIntent.id);
+        // You could store failed payment attempts if needed
+        break;
+
+      default:
+        console.log(`Unhandled event type: ${event.type}`);
     }
 
     res.json({ received: true });
