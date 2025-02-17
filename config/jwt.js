@@ -20,14 +20,14 @@ const generateRefreshToken = (user) => {
 
 const generateResetPasswordToken = (user) => {
   if (!process.env.JWT_RESET_PASSWORD_SECRET) {
-    throw new Error("JWT_RESET_PASSWORD_SECRET is not defined in environment variables");
+    throw new Error(
+      "JWT_RESET_PASSWORD_SECRET is not defined in environment variables"
+    );
   }
-  
-  return jwt.sign(
-    { userId: user._id },
-    process.env.JWT_RESET_PASSWORD_SECRET,
-    { expiresIn: "1h" }
-  );
+
+  return jwt.sign({ userId: user._id }, process.env.JWT_RESET_PASSWORD_SECRET, {
+    expiresIn: "1h",
+  });
 };
 
 // Token Verification Functions
@@ -41,7 +41,9 @@ const verifyRefreshToken = (token) => {
 
 const verifyResetPasswordToken = (token) => {
   if (!process.env.JWT_RESET_PASSWORD_SECRET) {
-    throw new Error("JWT_RESET_PASSWORD_SECRET is not defined in environment variables");
+    throw new Error(
+      "JWT_RESET_PASSWORD_SECRET is not defined in environment variables"
+    );
   }
 
   try {
